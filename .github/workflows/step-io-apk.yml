@@ -8,15 +8,16 @@ on:
     branches: [main]
 
 permissions:
+  actions: read
   contents: read
   issues: write
   pull-requests: write
 
 env:
   OCCT_TAG: V7_9_2
-  CPYTHON_TAG: v3.14.6
   ANDROID_NDK_VERSION: 28.2.13676358
   ANDROID_CMAKE_VERSION: 3.22.1
+  CPYTHON_SOURCE_RUN: 29654366295
 
 jobs:
   build-occt:
@@ -120,63 +121,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  build-python:
-    name: CPython ${{ matrix.abi }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 110
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - abi: armeabi-v7a
-            host: arm-linux-androideabi
-          - abi: arm64-v8a
-            host: aarch64-linux-android
-    steps:
-      - uses: actions/checkout@v4
-      - uses: android-actions/setup-android@v3
-      - name: Install requirements
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential curl pkg-config autoconf automake libtool libbz2-dev libffi-dev libgdbm-dev liblzma-dev libncurses-dev libreadline-dev libsqlite3-dev libssl-dev tk-dev uuid-dev zlib1g-dev
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "ndk;27.3.13750724"
-      - name: Cache CPython
-        id: cache-python
-        uses: actions/cache@v4
-        with:
-          path: .deps/python/${{ matrix.abi }}
-          key: cpython-${{ env.CPYTHON_TAG }}-android24-${{ matrix.abi }}-step-v2
-      - name: Build CPython when cache is absent
-        if: steps.cache-python.outputs.cache-hit != 'true'
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
-          ANDROID_API_LEVEL: 24
-        run: |
-          mkdir -p .deps/src
-          curl --fail --location --retry 4 "https://github.com/python/cpython/archive/refs/tags/${CPYTHON_TAG}.tar.gz" --output .deps/src/cpython.tar.gz
-          tar -xzf .deps/src/cpython.tar.gz -C .deps/src
-          mv ".deps/src/cpython-${CPYTHON_TAG#v}" .deps/src/cpython
-          cd .deps/src/cpython/Android
-          python3 android.py build -- --without-ensurepip
-          python3 android.py build "${{ matrix.host }}" -- --without-ensurepip
-          cd "${GITHUB_WORKSPACE}"
-          mkdir -p ".deps/python/${{ matrix.abi }}"
-          rsync -aL ".deps/src/cpython/cross-build/${{ matrix.host }}/prefix/" ".deps/python/${{ matrix.abi }}/"
-      - name: Verify CPython
-        run: |
-          test -f ".deps/python/${{ matrix.abi }}/include/python3.14/Python.h"
-          test -f ".deps/python/${{ matrix.abi }}/lib/libpython3.14.so"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cpython-step-${{ matrix.abi }}
-          path: .deps/python/${{ matrix.abi }}
-          if-no-files-found: error
-          retention-days: 7
-
   build-apk:
     name: Android STEP IO APK
-    needs: [build-occt, build-python]
+    needs: [build-occt]
     runs-on: ubuntu-24.04
     timeout-minutes: 70
     steps:
@@ -201,19 +148,28 @@ jobs:
         with:
           name: occt-step-arm64-v8a
           path: .deps/occt/arm64-v8a
-      - uses: actions/download-artifact@v4
+      - name: Download validated CPython ARM32
+        uses: actions/download-artifact@v4
         with:
-          name: cpython-step-armeabi-v7a
+          name: cpython-armeabi-v7a
           path: .deps/python/armeabi-v7a
-      - uses: actions/download-artifact@v4
+          repository: MedinaParra/FreeCAD-Native
+          run-id: ${{ env.CPYTHON_SOURCE_RUN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download validated CPython ARM64
+        uses: actions/download-artifact@v4
         with:
-          name: cpython-step-arm64-v8a
+          name: cpython-arm64-v8a
           path: .deps/python/arm64-v8a
+          repository: MedinaParra/FreeCAD-Native
+          run-id: ${{ env.CPYTHON_SOURCE_RUN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Package native libraries and Python runtime
         run: |
           rm -rf app/src/main/jniLibs app/src/main/assets/python-runtime .build/python-assets
           mkdir -p app/src/main/assets/python-runtime .build/python-assets
           for ABI in armeabi-v7a arm64-v8a; do
+            test -f ".deps/python/${ABI}/lib/libpython3.14.so"
             mkdir -p "app/src/main/jniLibs/${ABI}"
             cp ".deps/occt/${ABI}/lib/"*.so "app/src/main/jniLibs/${ABI}/"
             find ".deps/python/${ABI}/lib" -maxdepth 1 -type f -name '*.so' -exec cp {} "app/src/main/jniLibs/${ABI}/" \;
