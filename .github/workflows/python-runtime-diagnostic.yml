@@ -1,4 +1,4 @@
-name: CPython Android diagnostic
+name: CPython Android runtime cache
 
 on:
   pull_request:
@@ -10,10 +10,18 @@ permissions:
   pull-requests: write
 
 jobs:
-  diagnose-python:
-    name: CPython arm64 diagnostic
+  build-python-cache:
+    name: CPython ${{ matrix.abi }} runtime
     runs-on: ubuntu-24.04
     timeout-minutes: 105
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: armeabi-v7a
+            host: arm-linux-androideabi
+          - abi: arm64-v8a
+            host: aarch64-linux-android
 
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +37,15 @@ jobs:
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platform-tools" "ndk;27.3.13750724"
 
+      - name: Restore or reserve CPython runtime cache
+        id: cache-python
+        uses: actions/cache@v4
+        with:
+          path: .deps/python/${{ matrix.abi }}
+          key: cpython-v3.14.6-android24-${{ matrix.abi }}-v1
+
       - name: Download CPython 3.14.6
+        if: steps.cache-python.outputs.cache-hit != 'true'
         run: |
           mkdir -p .deps/src
           curl --fail --location --retry 4 \
@@ -38,43 +54,86 @@ jobs:
           tar -xzf .deps/src/cpython.tar.gz -C .deps/src
           mv .deps/src/cpython-3.14.6 .deps/src/cpython
 
-      - name: Build CPython and print concise diagnostics
-        id: build
+      - name: Build host Python then Android Python
+        if: steps.cache-python.outputs.cache-hit != 'true'
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
           ANDROID_API_LEVEL: 24
         run: |
           set +e
           cd .deps/src/cpython/Android
-          python3 android.py build aarch64-linux-android -- --without-ensurepip \
-            > "${GITHUB_WORKSPACE}/cpython-diagnostic.log" 2>&1
+          {
+            echo "=== BUILDING SERVER-SIDE PYTHON ==="
+            python3 android.py build build
+            HOST_STATUS=$?
+            if [ "${HOST_STATUS}" -ne 0 ]; then
+              exit "${HOST_STATUS}"
+            fi
+            echo "=== BUILDING ANDROID PYTHON: ${{ matrix.host }} ==="
+            python3 android.py build "${{ matrix.host }}"
+          } > "${GITHUB_WORKSPACE}/cpython-${{ matrix.abi }}.log" 2>&1
           STATUS=$?
           cd "${GITHUB_WORKSPACE}"
           echo "CPython build exit status: ${STATUS}"
           echo "----- LAST 220 LOG LINES -----"
-          tail -n 220 cpython-diagnostic.log
+          tail -n 220 "cpython-${{ matrix.abi }}.log"
           exit "${STATUS}"
 
-      - name: Upload full CPython diagnostic
-        if: always()
+      - name: Stage Android runtime
+        if: steps.cache-python.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ".deps/python/${{ matrix.abi }}"
+          rsync -aL \
+            ".deps/src/cpython/cross-build/${{ matrix.host }}/prefix/" \
+            ".deps/python/${{ matrix.abi }}/"
+
+      - name: Prune and verify runtime
+        run: |
+          PYTHON_ROOT=".deps/python/${{ matrix.abi }}"
+          rm -rf \
+            "${PYTHON_ROOT}/bin" \
+            "${PYTHON_ROOT}/lib/python3.14/test" \
+            "${PYTHON_ROOT}/lib/python3.14/idlelib" \
+            "${PYTHON_ROOT}/lib/python3.14/tkinter" \
+            "${PYTHON_ROOT}/lib/python3.14/turtledemo" \
+            "${PYTHON_ROOT}/lib/python3.14/ensurepip" \
+            "${PYTHON_ROOT}/lib/python3.14/venv"
+          find "${PYTHON_ROOT}" -type d -name __pycache__ -prune -exec rm -rf {} +
+          test -f "${PYTHON_ROOT}/include/python3.14/Python.h"
+          test -f "${PYTHON_ROOT}/lib/libpython3.14.so"
+          test -d "${PYTHON_ROOT}/lib/python3.14/encodings"
+
+      - name: Upload runtime artifact
         uses: actions/upload-artifact@v4
         with:
-          name: cpython-android-diagnostic
-          path: cpython-diagnostic.log
+          name: cpython-cache-${{ matrix.abi }}
+          path: .deps/python/${{ matrix.abi }}
           if-no-files-found: error
           retention-days: 7
 
-      - name: Publish diagnostic on PR
+      - name: Upload full diagnostic
+        if: always() && steps.cache-python.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpython-diagnostic-${{ matrix.abi }}
+          path: cpython-${{ matrix.abi }}.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Publish failure diagnostic on PR
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const log = fs.readFileSync('cpython-diagnostic.log', 'utf8');
+            const path = 'cpython-${{ matrix.abi }}.log';
+            const log = fs.existsSync(path)
+              ? fs.readFileSync(path, 'utf8')
+              : 'The runtime verification failed without a compiler log.';
             const tail = log.split(/\r?\n/).slice(-220).join('\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## CPython Android build diagnostic\n\n\`\`\`text\n${tail}\n\`\`\``
+              body: `## CPython ${{ matrix.abi }} diagnostic\n\n\`\`\`text\n${tail}\n\`\`\``
             });
