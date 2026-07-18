@@ -12,21 +12,22 @@ android {
         applicationId = "com.medinaparra.freecadandroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.3.1-native-universal"
+        versionCode = 5
+        versionName = "0.4.0-occt-core"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Physical Android devices may run a 32-bit userspace even when the CPU is ARM64.
-        // Package both ARM ABIs so entry-level devices such as OPPO A15 and HONOR X5
-        // can install and execute the native JNI library.
+        // Real devices are the current target. Both 32-bit and 64-bit ARM are built.
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
         }
 
         externalNativeBuild {
             cmake {
                 cppFlags += listOf("-std=c++17", "-Wall", "-Wextra", "-Wpedantic")
-                arguments += "-DANDROID_STL=c++_shared"
+                arguments += listOf(
+                    "-DANDROID_STL=c++_shared",
+                    "-DOCCT_INSTALL_ROOT=${rootProject.projectDir.absolutePath}/.deps/occt"
+                )
             }
         }
     }
