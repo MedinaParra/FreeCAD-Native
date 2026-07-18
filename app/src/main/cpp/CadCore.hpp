@@ -3,6 +3,7 @@
 #include <TopoDS_Shape.hxx>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -56,6 +57,7 @@ class CadCore final {
 public:
     static CadCore& instance();
 
+    void reset();
     std::uint64_t createDocument(const std::string& name);
     void closeDocument(std::uint64_t documentId);
 
@@ -108,6 +110,18 @@ public:
         std::uint64_t leftId,
         std::uint64_t rightId);
 
+    void setParameter(
+        std::uint64_t documentId,
+        std::uint64_t objectId,
+        std::size_t parameterIndex,
+        double value);
+
+    void setBooleanOperands(
+        std::uint64_t documentId,
+        std::uint64_t objectId,
+        std::uint64_t leftId,
+        std::uint64_t rightId);
+
     void setPlacement(
         std::uint64_t documentId,
         std::uint64_t objectId,
@@ -117,6 +131,10 @@ public:
         std::uint64_t documentId,
         std::uint64_t objectId,
         bool visible);
+
+    std::uint64_t objectIdByName(
+        std::uint64_t documentId,
+        const std::string& objectName) const;
 
     bool recompute(std::uint64_t documentId);
     TopoDS_Shape visibleShape(std::uint64_t documentId) const;
@@ -139,6 +157,8 @@ private:
         std::uint64_t leftId,
         std::uint64_t rightId);
 
+    static void validateParameters(const CadObject& object);
+
     static TopoDS_Shape buildObjectShape(
         const CadObject& object,
         const CadDocument& document);
@@ -150,6 +170,9 @@ private:
     CadDocument& requireDocumentLocked(std::uint64_t documentId);
     const CadDocument& requireDocumentLocked(std::uint64_t documentId) const;
     static CadObject& requireObjectLocked(CadDocument& document, std::uint64_t objectId);
+    static const CadObject& requireObjectLocked(
+        const CadDocument& document,
+        std::uint64_t objectId);
 
     mutable std::mutex mutex_;
     std::unordered_map<std::uint64_t, CadDocument> documents_;
