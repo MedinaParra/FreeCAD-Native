@@ -40,8 +40,8 @@ void CadCore::setParameter(
     std::lock_guard<std::mutex> lock(mutex_);
     CadDocument& document = requireDocumentLocked(documentId);
     CadObject& object = requireObjectLocked(document, objectId);
-    if (isBooleanKind(object.kind)) {
-        throw std::invalid_argument("Boolean objects do not expose numeric primitive parameters");
+    if (isBooleanKind(object.kind) || object.kind == ObjectKind::Imported) {
+        throw std::invalid_argument("This object does not expose numeric primitive parameters");
     }
 
     const double previous = object.parameters[parameterIndex];
@@ -90,9 +90,7 @@ std::uint64_t CadCore::objectIdByName(
     const CadDocument& document = requireDocumentLocked(documentId);
     for (const std::uint64_t objectId : document.evaluationOrder) {
         const CadObject& object = requireObjectLocked(document, objectId);
-        if (object.name == objectName) {
-            return object.id;
-        }
+        if (object.name == objectName) return object.id;
     }
     return 0U;
 }
@@ -125,6 +123,7 @@ void CadCore::validateParameters(const CadObject& object) {
                 throw std::invalid_argument("Torus Radius2 must be smaller than Radius1");
             }
             break;
+        case ObjectKind::Imported:
         case ObjectKind::Fuse:
         case ObjectKind::Cut:
         case ObjectKind::Common:

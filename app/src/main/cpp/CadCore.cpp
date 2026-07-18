@@ -32,6 +32,7 @@ const char* kindName(const ObjectKind kind) {
         case ObjectKind::Sphere: return "Part::Sphere";
         case ObjectKind::Cone: return "Part::Cone";
         case ObjectKind::Torus: return "Part::Torus";
+        case ObjectKind::Imported: return "Part::Feature (STEP)";
         case ObjectKind::Fuse: return "Part::Fuse";
         case ObjectKind::Cut: return "Part::Cut";
         case ObjectKind::Common: return "Part::Common";
@@ -85,9 +86,7 @@ std::uint64_t CadCore::addBox(
     requirePositive(height, "Height");
     std::lock_guard<std::mutex> lock(mutex_);
     return addPrimitiveLocked(
-        requireDocumentLocked(documentId),
-        name,
-        ObjectKind::Box,
+        requireDocumentLocked(documentId), name, ObjectKind::Box,
         {length, width, height, 0.0});
 }
 
@@ -100,9 +99,7 @@ std::uint64_t CadCore::addCylinder(
     requirePositive(height, "Height");
     std::lock_guard<std::mutex> lock(mutex_);
     return addPrimitiveLocked(
-        requireDocumentLocked(documentId),
-        name,
-        ObjectKind::Cylinder,
+        requireDocumentLocked(documentId), name, ObjectKind::Cylinder,
         {radius, height, 0.0, 0.0});
 }
 
@@ -113,9 +110,7 @@ std::uint64_t CadCore::addSphere(
     requirePositive(radius, "Radius");
     std::lock_guard<std::mutex> lock(mutex_);
     return addPrimitiveLocked(
-        requireDocumentLocked(documentId),
-        name,
-        ObjectKind::Sphere,
+        requireDocumentLocked(documentId), name, ObjectKind::Sphere,
         {radius, 0.0, 0.0, 0.0});
 }
 
@@ -132,9 +127,7 @@ std::uint64_t CadCore::addCone(
     requirePositive(height, "Height");
     std::lock_guard<std::mutex> lock(mutex_);
     return addPrimitiveLocked(
-        requireDocumentLocked(documentId),
-        name,
-        ObjectKind::Cone,
+        requireDocumentLocked(documentId), name, ObjectKind::Cone,
         {radius1, radius2, height, 0.0});
 }
 
@@ -150,10 +143,30 @@ std::uint64_t CadCore::addTorus(
     }
     std::lock_guard<std::mutex> lock(mutex_);
     return addPrimitiveLocked(
-        requireDocumentLocked(documentId),
-        name,
-        ObjectKind::Torus,
+        requireDocumentLocked(documentId), name, ObjectKind::Torus,
         {majorRadius, minorRadius, 0.0, 0.0});
+}
+
+std::uint64_t CadCore::addImportedShape(
+    const std::uint64_t documentId,
+    const std::string& name,
+    const TopoDS_Shape& sourceShape,
+    const std::string& sourcePath) {
+    if (sourceShape.IsNull()) {
+        throw std::invalid_argument("Imported STEP shape is null");
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    CadDocument& document = requireDocumentLocked(documentId);
+    const std::uint64_t id = nextObjectId_++;
+    CadObject object;
+    object.id = id;
+    object.name = name.empty() ? ("ImportedStep" + std::to_string(id)) : name;
+    object.kind = ObjectKind::Imported;
+    object.sourceShape = sourceShape;
+    object.sourcePath = sourcePath;
+    document.objects.emplace(id, std::move(object));
+    document.evaluationOrder.push_back(id);
+    return id;
 }
 
 std::uint64_t CadCore::addFuse(
@@ -199,7 +212,6 @@ void CadCore::setPlacement(
             throw std::invalid_argument("Placement contains a non-finite number");
         }
     }
-
     std::lock_guard<std::mutex> lock(mutex_);
     CadDocument& document = requireDocumentLocked(documentId);
     requireObjectLocked(document, objectId).placement = placement;
@@ -226,9 +238,11 @@ bool CadCore::recompute(const std::uint64_t documentId) {
             if (shape.IsNull()) {
                 throw std::runtime_error("OpenCASCADE returned a null shape for " + object.name);
             }
-            const BRepCheck_Analyzer analyzer(shape, Standard_True);
-            if (!analyzer.IsValid()) {
-                throw std::runtime_error("BRep validation failed for " + object.name);
+            if (object.kind != ObjectKind::Imported) {
+                const BRepCheck_Analyzer analyzer(shape, Standard_True);
+                if (!analyzer.IsValid()) {
+                    throw std::runtime_error("BRep validation failed for " + object.name);
+                }
             }
             object.shape = std::move(shape);
         }
@@ -246,24 +260,19 @@ bool CadCore::recompute(const std::uint64_t documentId) {
 TopoDS_Shape CadCore::visibleShape(const std::uint64_t documentId) const {
     std::lock_guard<std::mutex> lock(mutex_);
     const CadDocument& document = requireDocumentLocked(documentId);
-
     BRep_Builder builder;
     TopoDS_Compound compound;
     builder.MakeCompound(compound);
     bool hasShape = false;
-
     for (const std::uint64_t objectId : document.evaluationOrder) {
         const auto iterator = document.objects.find(objectId);
-        if (iterator == document.objects.end()) {
-            continue;
-        }
+        if (iterator == document.objects.end()) continue;
         const CadObject& object = iterator->second;
         if (object.visible && !object.shape.IsNull()) {
             builder.Add(compound, object.shape);
             hasShape = true;
         }
     }
-
     return hasShape ? TopoDS_Shape(compound) : TopoDS_Shape();
 }
 
@@ -282,7 +291,11 @@ std::string CadCore::documentSummary(const std::uint64_t documentId) const {
         const CadObject& object = document.objects.at(objectId);
         output << "#" << object.id << " " << object.name << " ["
                << kindName(object.kind) << "] visible="
-               << (object.visible ? "true" : "false") << "\n";
+               << (object.visible ? "true" : "false");
+        if (object.kind == ObjectKind::Imported && !object.sourcePath.empty()) {
+            output << " source=" << object.sourcePath;
+        }
+        output << "\n";
     }
     return output.str();
 }
@@ -314,7 +327,6 @@ std::uint64_t CadCore::addBooleanLocked(
     }
     CadObject& left = requireObjectLocked(document, leftId);
     CadObject& right = requireObjectLocked(document, rightId);
-
     const std::uint64_t id = nextObjectId_++;
     CadObject object;
     object.id = id;
@@ -322,8 +334,6 @@ std::uint64_t CadCore::addBooleanLocked(
     object.kind = kind;
     object.leftId = leftId;
     object.rightId = rightId;
-
-    // Match FreeCAD's usual boolean behavior: operands remain in the document but are hidden.
     left.visible = false;
     right.visible = false;
     document.objects.emplace(id, std::move(object));
@@ -335,26 +345,24 @@ TopoDS_Shape CadCore::buildObjectShape(
     const CadObject& object,
     const CadDocument& document) {
     TopoDS_Shape result;
-
     switch (object.kind) {
         case ObjectKind::Box:
-            result = BRepPrimAPI_MakeBox(
-                object.parameters[0], object.parameters[1], object.parameters[2]).Shape();
+            result = BRepPrimAPI_MakeBox(object.parameters[0], object.parameters[1], object.parameters[2]).Shape();
             break;
         case ObjectKind::Cylinder:
-            result = BRepPrimAPI_MakeCylinder(
-                object.parameters[0], object.parameters[1]).Shape();
+            result = BRepPrimAPI_MakeCylinder(object.parameters[0], object.parameters[1]).Shape();
             break;
         case ObjectKind::Sphere:
             result = BRepPrimAPI_MakeSphere(object.parameters[0]).Shape();
             break;
         case ObjectKind::Cone:
-            result = BRepPrimAPI_MakeCone(
-                object.parameters[0], object.parameters[1], object.parameters[2]).Shape();
+            result = BRepPrimAPI_MakeCone(object.parameters[0], object.parameters[1], object.parameters[2]).Shape();
             break;
         case ObjectKind::Torus:
-            result = BRepPrimAPI_MakeTorus(
-                object.parameters[0], object.parameters[1]).Shape();
+            result = BRepPrimAPI_MakeTorus(object.parameters[0], object.parameters[1]).Shape();
+            break;
+        case ObjectKind::Imported:
+            result = object.sourceShape;
             break;
         case ObjectKind::Fuse:
         case ObjectKind::Cut:
@@ -364,36 +372,28 @@ TopoDS_Shape CadCore::buildObjectShape(
             if (left.shape.IsNull() || right.shape.IsNull()) {
                 throw std::runtime_error("Boolean dependency has not been recomputed");
             }
-
             if (object.kind == ObjectKind::Fuse) {
                 BRepAlgoAPI_Fuse operation(left.shape, right.shape);
                 operation.SetRunParallel(Standard_False);
                 operation.Build();
-                if (!operation.IsDone()) {
-                    throw std::runtime_error("BRep fuse failed");
-                }
+                if (!operation.IsDone()) throw std::runtime_error("BRep fuse failed");
                 result = operation.Shape();
             } else if (object.kind == ObjectKind::Cut) {
                 BRepAlgoAPI_Cut operation(left.shape, right.shape);
                 operation.SetRunParallel(Standard_False);
                 operation.Build();
-                if (!operation.IsDone()) {
-                    throw std::runtime_error("BRep cut failed");
-                }
+                if (!operation.IsDone()) throw std::runtime_error("BRep cut failed");
                 result = operation.Shape();
             } else {
                 BRepAlgoAPI_Common operation(left.shape, right.shape);
                 operation.SetRunParallel(Standard_False);
                 operation.Build();
-                if (!operation.IsDone()) {
-                    throw std::runtime_error("BRep common failed");
-                }
+                if (!operation.IsDone()) throw std::runtime_error("BRep common failed");
                 result = operation.Shape();
             }
             break;
         }
     }
-
     return applyPlacement(result, object.placement);
 }
 
@@ -401,24 +401,17 @@ TopoDS_Shape CadCore::applyPlacement(
     const TopoDS_Shape& shape,
     const Placement& placement) {
     const double norm = std::sqrt(
-        placement.qx * placement.qx +
-        placement.qy * placement.qy +
-        placement.qz * placement.qz +
-        placement.qw * placement.qw);
-
+        placement.qx * placement.qx + placement.qy * placement.qy +
+        placement.qz * placement.qz + placement.qw * placement.qw);
     gp_Quaternion rotation;
     if (norm > 1.0e-12) {
         rotation = gp_Quaternion(
-            placement.qx / norm,
-            placement.qy / norm,
-            placement.qz / norm,
-            placement.qw / norm);
+            placement.qx / norm, placement.qy / norm,
+            placement.qz / norm, placement.qw / norm);
     }
-
     gp_Trsf transform;
     transform.SetRotation(rotation);
     transform.SetTranslationPart(gp_Vec(placement.x, placement.y, placement.z));
-
     BRepBuilderAPI_Transform transformer(shape, transform, Standard_True);
     transformer.Build();
     if (!transformer.IsDone()) {
@@ -429,27 +422,19 @@ TopoDS_Shape CadCore::applyPlacement(
 
 CadDocument& CadCore::requireDocumentLocked(const std::uint64_t documentId) {
     const auto iterator = documents_.find(documentId);
-    if (iterator == documents_.end()) {
-        throw std::invalid_argument("Unknown document handle");
-    }
+    if (iterator == documents_.end()) throw std::invalid_argument("Unknown document handle");
     return iterator->second;
 }
 
 const CadDocument& CadCore::requireDocumentLocked(const std::uint64_t documentId) const {
     const auto iterator = documents_.find(documentId);
-    if (iterator == documents_.end()) {
-        throw std::invalid_argument("Unknown document handle");
-    }
+    if (iterator == documents_.end()) throw std::invalid_argument("Unknown document handle");
     return iterator->second;
 }
 
-CadObject& CadCore::requireObjectLocked(
-    CadDocument& document,
-    const std::uint64_t objectId) {
+CadObject& CadCore::requireObjectLocked(CadDocument& document, const std::uint64_t objectId) {
     const auto iterator = document.objects.find(objectId);
-    if (iterator == document.objects.end()) {
-        throw std::invalid_argument("Unknown object handle");
-    }
+    if (iterator == document.objects.end()) throw std::invalid_argument("Unknown object handle");
     return iterator->second;
 }
 

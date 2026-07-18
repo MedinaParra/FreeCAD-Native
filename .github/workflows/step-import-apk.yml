@@ -1,0 +1,354 @@
+name: STEP import core APK
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+env:
+  OCCT_TAG: V7_9_2
+  CPYTHON_TAG: v3.14.6
+  ANDROID_NDK_VERSION: 28.2.13676358
+  ANDROID_CMAKE_VERSION: 3.22.1
+
+jobs:
+  build-occt-step:
+    name: OCCT STEP ${{ matrix.abi }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [armeabi-v7a, arm64-v8a]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK and CMake
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "ndk;${ANDROID_NDK_VERSION}" "cmake;${ANDROID_CMAKE_VERSION}"
+
+      - name: Cache OCCT STEP runtime
+        id: cache-occt
+        uses: actions/cache@v4
+        with:
+          path: .deps/occt/${{ matrix.abi }}
+          key: occt-${{ env.OCCT_TAG }}-ndk-${{ env.ANDROID_NDK_VERSION }}-${{ matrix.abi }}-step-v1
+
+      - name: Download OCCT source
+        if: steps.cache-occt.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p .deps/src
+          curl --fail --location --retry 4 \
+            "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/${OCCT_TAG}.tar.gz" \
+            --output .deps/src/occt.tar.gz
+          tar -xzf .deps/src/occt.tar.gz -C .deps/src
+          mv ".deps/src/OCCT-${OCCT_TAG#V}" .deps/src/occt
+
+      - name: Configure OCCT data exchange for Android
+        if: steps.cache-occt.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          NDK_ROOT="${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK_VERSION}"
+          CMAKE_BIN="${ANDROID_SDK_ROOT}/cmake/${ANDROID_CMAKE_VERSION}/bin/cmake"
+          NINJA_BIN="${ANDROID_SDK_ROOT}/cmake/${ANDROID_CMAKE_VERSION}/bin/ninja"
+          INSTALL_ROOT="${GITHUB_WORKSPACE}/.deps/occt/${{ matrix.abi }}"
+          mkdir -p "${INSTALL_ROOT}"
+
+          "${CMAKE_BIN}" \
+            -S .deps/src/occt \
+            -B ".deps/build/occt-${{ matrix.abi }}" \
+            -G Ninja \
+            -DCMAKE_MAKE_PROGRAM="${NINJA_BIN}" \
+            -DCMAKE_TOOLCHAIN_FILE="${NDK_ROOT}/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI="${{ matrix.abi }}" \
+            -DANDROID_PLATFORM=android-26 \
+            -DANDROID_STL=c++_shared \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="${INSTALL_ROOT}" \
+            -DINSTALL_DIR="${INSTALL_ROOT}" \
+            -DINSTALL_DIR_LAYOUT=Unix \
+            -DBUILD_LIBRARY_TYPE=Shared \
+            -DBUILD_CPP_STANDARD=C++17 \
+            -DBUILD_MODULE_FoundationClasses=ON \
+            -DBUILD_MODULE_ModelingData=ON \
+            -DBUILD_MODULE_ModelingAlgorithms=ON \
+            -DBUILD_MODULE_Visualization=ON \
+            -DBUILD_MODULE_ApplicationFramework=ON \
+            -DBUILD_MODULE_DataExchange=ON \
+            -DBUILD_MODULE_DETools=ON \
+            -DBUILD_MODULE_Draw=OFF \
+            -DBUILD_RELEASE_DISABLE_EXCEPTIONS=OFF \
+            -DBUILD_ENABLE_FPE_SIGNAL_HANDLER=OFF \
+            -DBUILD_RESOURCES=OFF \
+            -DBUILD_DOC_Overview=OFF \
+            -DBUILD_SAMPLES_QT=OFF \
+            -DBUILD_Inspector=OFF \
+            -DINSTALL_SAMPLES=OFF \
+            -DINSTALL_TEST_CASES=OFF \
+            -DBUILD_YACCLEX=OFF \
+            -DBUILD_USE_PCH=OFF \
+            -DUSE_MMGR_TYPE=NATIVE \
+            -DUSE_TK=OFF \
+            -DUSE_FREETYPE=OFF \
+            -DUSE_TBB=OFF \
+            -DUSE_OPENGL=OFF \
+            -DUSE_GLES2=OFF \
+            -DUSE_FREEIMAGE=OFF \
+            -DUSE_FFMPEG=OFF \
+            -DUSE_RAPIDJSON=OFF \
+            -DUSE_DRACO=OFF \
+            -DUSE_VTK=OFF
+
+      - name: Build OCCT STEP toolkits
+        if: steps.cache-occt.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          CMAKE_BIN="${ANDROID_SDK_ROOT}/cmake/${ANDROID_CMAKE_VERSION}/bin/cmake"
+          "${CMAKE_BIN}" --build ".deps/build/occt-${{ matrix.abi }}" --target install --parallel 2
+
+      - name: Stage OCCT exchange resources
+        if: steps.cache-occt.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          RESOURCE_ROOT=".deps/occt/${{ matrix.abi }}/resources"
+          mkdir -p "${RESOURCE_ROOT}"
+          for DIRECTORY in SHMessage XSMessage StdResource XSTEPResource; do
+            cp -R ".deps/src/occt/src/${DIRECTORY}" "${RESOURCE_ROOT}/${DIRECTORY}"
+          done
+
+      - name: Verify OCCT STEP runtime
+        run: |
+          set -euo pipefail
+          ROOT=".deps/occt/${{ matrix.abi }}"
+          test -f "${ROOT}/include/opencascade/STEPControl_Reader.hxx"
+          test -f "${ROOT}/lib/libTKDESTEP.so"
+          test -f "${ROOT}/lib/libTKXSBase.so"
+          test -f "${ROOT}/lib/libTKBRep.so"
+          test -f "${ROOT}/lib/libTKMesh.so"
+          test -f "${ROOT}/resources/XSTEPResource/STEP"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: occt-step-${{ matrix.abi }}
+          path: .deps/occt/${{ matrix.abi }}
+          if-no-files-found: error
+          retention-days: 7
+
+  build-python:
+    name: CPython ${{ matrix.abi }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: armeabi-v7a
+            host: arm-linux-androideabi
+          - abi: arm64-v8a
+            host: aarch64-linux-android
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+
+      - name: Install CPython build requirements
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential curl pkg-config autoconf automake libtool \
+            libbz2-dev libffi-dev libgdbm-dev liblzma-dev libncurses-dev \
+            libreadline-dev libsqlite3-dev libssl-dev tk-dev uuid-dev zlib1g-dev
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "ndk;27.3.13750724"
+
+      - name: Cache CPython Android runtime
+        id: cache-python
+        uses: actions/cache@v4
+        with:
+          path: .deps/python/${{ matrix.abi }}
+          key: cpython-${{ env.CPYTHON_TAG }}-android24-${{ matrix.abi }}-v1
+
+      - name: Build CPython for Android
+        if: steps.cache-python.outputs.cache-hit != 'true'
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+          ANDROID_API_LEVEL: 24
+        run: |
+          set -euo pipefail
+          mkdir -p .deps/src
+          curl --fail --location --retry 4 \
+            "https://github.com/python/cpython/archive/refs/tags/${CPYTHON_TAG}.tar.gz" \
+            --output .deps/src/cpython.tar.gz
+          tar -xzf .deps/src/cpython.tar.gz -C .deps/src
+          mv ".deps/src/cpython-${CPYTHON_TAG#v}" .deps/src/cpython
+          cd .deps/src/cpython/Android
+          python3 android.py build "${{ matrix.host }}" -- --without-ensurepip
+          cd "${GITHUB_WORKSPACE}"
+          mkdir -p ".deps/python/${{ matrix.abi }}"
+          rsync -aL \
+            ".deps/src/cpython/cross-build/${{ matrix.host }}/prefix/" \
+            ".deps/python/${{ matrix.abi }}/"
+
+      - name: Prune and verify CPython
+        run: |
+          set -euo pipefail
+          ROOT=".deps/python/${{ matrix.abi }}"
+          rm -rf "${ROOT}/bin" "${ROOT}/lib/python3.14/test" \
+            "${ROOT}/lib/python3.14/idlelib" "${ROOT}/lib/python3.14/tkinter" \
+            "${ROOT}/lib/python3.14/turtledemo" "${ROOT}/lib/python3.14/ensurepip" \
+            "${ROOT}/lib/python3.14/venv"
+          find "${ROOT}" -type d -name __pycache__ -prune -exec rm -rf {} +
+          test -f "${ROOT}/include/python3.14/Python.h"
+          test -f "${ROOT}/lib/libpython3.14.so"
+          test -d "${ROOT}/lib/python3.14/encodings"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpython-step-${{ matrix.abi }}
+          path: .deps/python/${{ matrix.abi }}
+          if-no-files-found: error
+          retention-days: 7
+
+  build-apk:
+    name: Android STEP import APK
+    needs: [build-occt-step, build-python]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android toolchain
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" \
+            "ndk;${ANDROID_NDK_VERSION}" "cmake;${ANDROID_CMAKE_VERSION}"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: occt-step-armeabi-v7a
+          path: .deps/occt/armeabi-v7a
+      - uses: actions/download-artifact@v4
+        with:
+          name: occt-step-arm64-v8a
+          path: .deps/occt/arm64-v8a
+      - uses: actions/download-artifact@v4
+        with:
+          name: cpython-step-armeabi-v7a
+          path: .deps/python/armeabi-v7a
+      - uses: actions/download-artifact@v4
+        with:
+          name: cpython-step-arm64-v8a
+          path: .deps/python/arm64-v8a
+
+      - name: Validate Python modules
+        run: python3 -m py_compile app/src/main/python/FreeCAD.py app/src/main/python/Part.py
+
+      - name: Package native libraries and runtime assets
+        run: |
+          set -euo pipefail
+          rm -rf app/src/main/jniLibs app/src/main/assets/python-runtime .build/python-assets
+          rm -f app/src/main/assets/occt-step-resources.zip
+          mkdir -p app/src/main/assets/python-runtime .build/python-assets
+
+          for ABI in armeabi-v7a arm64-v8a; do
+            mkdir -p "app/src/main/jniLibs/${ABI}"
+            cp ".deps/occt/${ABI}/lib/"*.so "app/src/main/jniLibs/${ABI}/"
+            find ".deps/python/${ABI}/lib" -maxdepth 1 -type f -name '*.so' \
+              -exec cp {} "app/src/main/jniLibs/${ABI}/" \;
+
+            STAGE=".build/python-assets/${ABI}"
+            mkdir -p "${STAGE}/lib/python3.14/site-packages"
+            rsync -a ".deps/python/${ABI}/lib/python3.14/" "${STAGE}/lib/python3.14/"
+            cp app/src/main/python/FreeCAD.py app/src/main/python/Part.py \
+              "${STAGE}/lib/python3.14/site-packages/"
+            find "${STAGE}" -type d -name __pycache__ -prune -exec rm -rf {} +
+            (cd "${STAGE}" && zip -q -9 -r \
+              "${GITHUB_WORKSPACE}/app/src/main/assets/python-runtime/${ABI}.zip" .)
+          done
+
+          (cd .deps/occt/arm64-v8a/resources && zip -q -9 -r \
+            "${GITHUB_WORKSPACE}/app/src/main/assets/occt-step-resources.zip" .)
+
+      - name: Compile STEP import APK
+        run: |
+          set -o pipefail
+          gradle :app:assembleDebug --stacktrace 2>&1 | tee step-app-build.log
+
+      - name: Verify packaged STEP core
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          unzip -l "${APK}" | tee apk-contents.txt
+          for ABI in armeabi-v7a arm64-v8a; do
+            grep -q "lib/${ABI}/libfreecad_android_core.so" apk-contents.txt
+            grep -q "lib/${ABI}/libpython3.14.so" apk-contents.txt
+            grep -q "lib/${ABI}/libTKDESTEP.so" apk-contents.txt
+            grep -q "lib/${ABI}/libTKXSBase.so" apk-contents.txt
+            grep -q "assets/python-runtime/${ABI}.zip" apk-contents.txt
+          done
+          grep -q "assets/occt-step-resources.zip" apk-contents.txt
+          cp "${APK}" FreeCAD-Android-STEP-Core-v0.6.0.apk
+          sha256sum FreeCAD-Android-STEP-Core-v0.6.0.apk \
+            > FreeCAD-Android-STEP-Core-v0.6.0.apk.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freecad-android-step-core-apk
+          path: |
+            FreeCAD-Android-STEP-Core-v0.6.0.apk
+            FreeCAD-Android-STEP-Core-v0.6.0.apk.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: step-core-build-diagnostics
+          path: |
+            step-app-build.log
+            apk-contents.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Report build failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const log = fs.existsSync('step-app-build.log')
+              ? fs.readFileSync('step-app-build.log', 'utf8')
+              : 'The APK build did not produce a Gradle log.';
+            const lines = log.split(/\r?\n/);
+            const selected = lines.filter(line =>
+              /(^e:| error:|undefined reference|CMake Error|TKDESTEP|STEPControl|unresolved reference)/i.test(line)
+            );
+            const report = (selected.length ? selected : lines.slice(-140)).slice(-240).join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## STEP core build diagnostics\n\n\`\`\`text\n${report}\n\`\`\``
+            });

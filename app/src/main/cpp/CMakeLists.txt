@@ -2,29 +2,27 @@ cmake_minimum_required(VERSION 3.22.1)
 project(freecad_android_core LANGUAGES CXX)
 
 if(NOT DEFINED OCCT_INSTALL_ROOT)
-    message(FATAL_ERROR "OCCT_INSTALL_ROOT was not provided. Build OCCT first with the repository workflow or scripts.")
+    message(FATAL_ERROR "OCCT_INSTALL_ROOT was not provided")
 endif()
 if(NOT DEFINED PYTHON_INSTALL_ROOT)
-    message(FATAL_ERROR "PYTHON_INSTALL_ROOT was not provided. Build CPython first with the repository workflow.")
+    message(FATAL_ERROR "PYTHON_INSTALL_ROOT was not provided")
 endif()
 
 set(OCCT_ABI_ROOT "${OCCT_INSTALL_ROOT}/${ANDROID_ABI}")
 set(OCCT_INCLUDE_DIR "${OCCT_ABI_ROOT}/include/opencascade")
 set(OCCT_LIBRARY_DIR "${OCCT_ABI_ROOT}/lib")
-
 if(NOT EXISTS "${OCCT_INCLUDE_DIR}/Standard_Version.hxx")
-    message(FATAL_ERROR "OpenCASCADE headers not found for ABI ${ANDROID_ABI}: ${OCCT_INCLUDE_DIR}")
+    message(FATAL_ERROR "OpenCASCADE headers not found for ABI ${ANDROID_ABI}")
 endif()
 
 set(PYTHON_ABI_ROOT "${PYTHON_INSTALL_ROOT}/${ANDROID_ABI}")
 set(PYTHON_INCLUDE_DIR "${PYTHON_ABI_ROOT}/include/python3.14")
 set(PYTHON_LIBRARY "${PYTHON_ABI_ROOT}/lib/libpython3.14.so")
-
 if(NOT EXISTS "${PYTHON_INCLUDE_DIR}/Python.h")
-    message(FATAL_ERROR "CPython headers not found for ABI ${ANDROID_ABI}: ${PYTHON_INCLUDE_DIR}")
+    message(FATAL_ERROR "CPython headers not found for ABI ${ANDROID_ABI}")
 endif()
 if(NOT EXISTS "${PYTHON_LIBRARY}")
-    message(FATAL_ERROR "CPython shared library not found for ABI ${ANDROID_ABI}: ${PYTHON_LIBRARY}")
+    message(FATAL_ERROR "CPython shared library not found for ABI ${ANDROID_ABI}")
 endif()
 
 add_library(Python::Runtime SHARED IMPORTED)
@@ -49,6 +47,7 @@ set(OCCT_TOOLKITS
     TKMesh
     TKXMesh
     TKShHealing
+    TKDESTEP
 )
 
 set(OCCT_IMPORTED_TARGETS)
@@ -70,8 +69,10 @@ add_library(
     OcctMesher.cpp
     PyFreeCadModule.cpp
     PythonRuntime.cpp
+    StepImporter.cpp
     jni_bridge.cpp
     jni_python_bridge.cpp
+    jni_step_bridge.cpp
 )
 
 target_compile_features(freecad_android_core PRIVATE cxx_std_17)
