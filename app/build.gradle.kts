@@ -12,8 +12,8 @@ android {
         applicationId = "com.medinaparra.freecadandroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.5.0-python-macros"
+        versionCode = 7
+        versionName = "0.6.0-step-import"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
