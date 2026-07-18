@@ -43,12 +43,14 @@ jobs:
             const log = fs.existsSync('native-build.log')
               ? fs.readFileSync('native-build.log', 'utf8')
               : 'native-build.log was not created';
-            const tail = log.slice(-18000);
+            const lines = log.split(/\r?\n/);
+            const selected = lines.filter(line => /(^e:| error:|unresolved reference|cannot access|compilation error|MainScreenNative|NativeBoxBridge|native_box\.cpp|CMake Error)/i.test(line));
+            const report = (selected.length ? selected : lines.slice(-80)).slice(-160).join('\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `## Native build failure\n\n\`\`\`text\n${tail}\n\`\`\``
+              body: `## Native compiler diagnostics\n\n\`\`\`text\n${report}\n\`\`\``
             });
       - name: Upload native build log
         if: always()
