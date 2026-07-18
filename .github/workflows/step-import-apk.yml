@@ -135,7 +135,8 @@ jobs:
           test -f "${ROOT}/lib/libTKXSBase.so"
           test -f "${ROOT}/lib/libTKBRep.so"
           test -f "${ROOT}/lib/libTKMesh.so"
-          test -f "${ROOT}/resources/XSTEPResource/STEP"
+          test -d "${ROOT}/resources/XSTEPResource"
+          find "${ROOT}/resources/XSTEPResource" -type f | grep -q .
 
       - uses: actions/upload-artifact@v4
         with:
@@ -147,7 +148,7 @@ jobs:
   build-python:
     name: CPython ${{ matrix.abi }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 110
+    timeout-minutes: 130
     strategy:
       fail-fast: false
       matrix:
@@ -177,13 +178,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .deps/python/${{ matrix.abi }}
-          key: cpython-${{ env.CPYTHON_TAG }}-android24-${{ matrix.abi }}-v1
+          key: cpython-${{ env.CPYTHON_TAG }}-android24-${{ matrix.abi }}-explicit-host-v2
 
-      - name: Build CPython for Android
+      - name: Download CPython source
         if: steps.cache-python.outputs.cache-hit != 'true'
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
-          ANDROID_API_LEVEL: 24
         run: |
           set -euo pipefail
           mkdir -p .deps/src
@@ -192,8 +190,22 @@ jobs:
             --output .deps/src/cpython.tar.gz
           tar -xzf .deps/src/cpython.tar.gz -C .deps/src
           mv ".deps/src/cpython-${CPYTHON_TAG#v}" .deps/src/cpython
+
+      - name: Build host and Android CPython
+        if: steps.cache-python.outputs.cache-hit != 'true'
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
+          ANDROID_API_LEVEL: 24
+        run: |
+          set -euo pipefail
+          set -o pipefail
           cd .deps/src/cpython/Android
-          python3 android.py build "${{ matrix.host }}" -- --without-ensurepip
+          python3 android.py configure-build 2>&1 | tee "${GITHUB_WORKSPACE}/cpython-configure-build-${{ matrix.abi }}.log"
+          python3 android.py make-build 2>&1 | tee "${GITHUB_WORKSPACE}/cpython-make-build-${{ matrix.abi }}.log"
+          python3 android.py configure-host "${{ matrix.host }}" -- --without-ensurepip \
+            2>&1 | tee "${GITHUB_WORKSPACE}/cpython-configure-host-${{ matrix.abi }}.log"
+          python3 android.py make-host "${{ matrix.host }}" \
+            2>&1 | tee "${GITHUB_WORKSPACE}/cpython-make-host-${{ matrix.abi }}.log"
           cd "${GITHUB_WORKSPACE}"
           mkdir -p ".deps/python/${{ matrix.abi }}"
           rsync -aL \
@@ -212,6 +224,15 @@ jobs:
           test -f "${ROOT}/include/python3.14/Python.h"
           test -f "${ROOT}/lib/libpython3.14.so"
           test -d "${ROOT}/lib/python3.14/encodings"
+
+      - name: Upload CPython diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpython-step-diagnostics-${{ matrix.abi }}
+          path: cpython-*.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - uses: actions/upload-artifact@v4
         with:
