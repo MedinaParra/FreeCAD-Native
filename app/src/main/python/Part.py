@@ -81,6 +81,37 @@ def makeTorus(radius1, radius2, pnt=None):
     )
 
 
+def _install_boolean_visibility_policy():
+    """Match FreeCAD's default rule: boolean inputs are hidden after recompute."""
+    if getattr(App.Document, "_android_boolean_visibility_installed", False):
+        return
+
+    original_recompute = App.Document.recompute
+    boolean_types = {"Part::Fuse", "Part::Cut", "Part::Common"}
+
+    def recompute_with_boolean_visibility(document):
+        consumed_objects = set()
+        for obj in document.Objects:
+            if obj.TypeId not in boolean_types:
+                continue
+            if obj.Base is not None:
+                consumed_objects.add(obj.Base)
+            if obj.Tool is not None:
+                consumed_objects.add(obj.Tool)
+
+        for obj in consumed_objects:
+            object.__setattr__(obj, "_visibility", False)
+            if obj._id:
+                App._native.set_visibility(document._id, obj._id, False)
+
+        return original_recompute(document)
+
+    App.Document.recompute = recompute_with_boolean_visibility
+    App.Document._android_boolean_visibility_installed = True
+
+
+_install_boolean_visibility_policy()
+
 Vector = App.Vector
 
 __all__ = [
