@@ -12,11 +12,10 @@ android {
         applicationId = "com.medinaparra.freecadandroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.4.0-occt-core"
+        versionCode = 6
+        versionName = "0.5.0-python-macros"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Real devices are the current target. Both 32-bit and 64-bit ARM are built.
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a")
         }
@@ -26,7 +25,8 @@ android {
                 cppFlags += listOf("-std=c++17", "-Wall", "-Wextra", "-Wpedantic")
                 arguments += listOf(
                     "-DANDROID_STL=c++_shared",
-                    "-DOCCT_INSTALL_ROOT=${rootProject.projectDir.absolutePath}/.deps/occt"
+                    "-DOCCT_INSTALL_ROOT=${rootProject.projectDir.absolutePath}/.deps/occt",
+                    "-DPYTHON_INSTALL_ROOT=${rootProject.projectDir.absolutePath}/.deps/python"
                 )
             }
         }
@@ -61,6 +61,13 @@ android {
 
     packaging {
         jniLibs { useLegacyPackaging = false }
+        resources.excludes += setOf(
+            "META-INF/DEPENDENCIES",
+            "META-INF/LICENSE",
+            "META-INF/LICENSE.txt",
+            "META-INF/NOTICE",
+            "META-INF/NOTICE.txt"
+        )
     }
 
     testOptions {
