@@ -49,6 +49,9 @@ set(OCCT_TOOLKITS
     TKMesh
     TKXMesh
     TKShHealing
+    TKDE
+    TKXSBase
+    TKDESTEP
 )
 
 set(OCCT_IMPORTED_TARGETS)
@@ -68,6 +71,7 @@ add_library(
     CadCore.cpp
     CadCoreScripting.cpp
     OcctMesher.cpp
+    StepIo.cpp
     PyFreeCadModule.cpp
     PythonRuntime.cpp
     jni_bridge.cpp
