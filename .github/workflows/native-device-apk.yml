@@ -23,6 +23,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
       - uses: android-actions/setup-android@v3
       - name: Install Android NDK and CMake
         run: |
@@ -30,9 +32,8 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools" "ndk;28.2.13676358" "cmake;3.22.1"
       - name: Compile native APK
         run: |
-          chmod +x gradlew
           set -o pipefail
-          ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee native-build.log
+          gradle :app:assembleDebug --stacktrace 2>&1 | tee native-build.log
       - name: Report native build failure
         if: failure() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
