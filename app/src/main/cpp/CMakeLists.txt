@@ -71,6 +71,7 @@ add_library(
     PyFreeCadModule.cpp
     PythonRuntime.cpp
     jni_bridge.cpp
+    jni_python_bridge.cpp
 )
 
 target_compile_features(freecad_android_core PRIVATE cxx_std_17)
