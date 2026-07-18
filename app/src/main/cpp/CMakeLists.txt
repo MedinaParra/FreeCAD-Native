@@ -1,10 +1,83 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(freecad_android_core LANGUAGES CXX)
 
-add_library(freecad_android_core SHARED native_box.cpp)
+if(NOT DEFINED OCCT_INSTALL_ROOT)
+    message(FATAL_ERROR "OCCT_INSTALL_ROOT was not provided. Build OCCT first with the repository workflow or scripts.")
+endif()
+
+set(OCCT_ABI_ROOT "${OCCT_INSTALL_ROOT}/${ANDROID_ABI}")
+set(OCCT_INCLUDE_DIR "${OCCT_ABI_ROOT}/include/opencascade")
+set(OCCT_LIBRARY_DIR "${OCCT_ABI_ROOT}/lib")
+
+if(NOT EXISTS "${OCCT_INCLUDE_DIR}/Standard_Version.hxx")
+    message(FATAL_ERROR "OpenCASCADE headers not found for ABI ${ANDROID_ABI}: ${OCCT_INCLUDE_DIR}")
+endif()
+
+set(OCCT_TOOLKITS
+    TKernel
+    TKMath
+    TKG2d
+    TKG3d
+    TKGeomBase
+    TKBRep
+    TKGeomAlgo
+    TKTopAlgo
+    TKPrim
+    TKBO
+    TKBool
+    TKHLR
+    TKFillet
+    TKOffset
+    TKFeat
+    TKMesh
+    TKXMesh
+    TKShHealing
+)
+
+set(OCCT_IMPORTED_TARGETS)
+foreach(TOOLKIT IN LISTS OCCT_TOOLKITS)
+    set(TOOLKIT_FILE "${OCCT_LIBRARY_DIR}/lib${TOOLKIT}.so")
+    if(NOT EXISTS "${TOOLKIT_FILE}")
+        message(FATAL_ERROR "Required OCCT toolkit is missing: ${TOOLKIT_FILE}")
+    endif()
+    add_library(OCCT::${TOOLKIT} SHARED IMPORTED)
+    set_target_properties(OCCT::${TOOLKIT} PROPERTIES IMPORTED_LOCATION "${TOOLKIT_FILE}")
+    list(APPEND OCCT_IMPORTED_TARGETS OCCT::${TOOLKIT})
+endforeach()
+
+add_library(
+    freecad_android_core
+    SHARED
+    CadCore.cpp
+    OcctMesher.cpp
+    jni_bridge.cpp
+)
 
 target_compile_features(freecad_android_core PRIVATE cxx_std_17)
-target_compile_options(freecad_android_core PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(
+    freecad_android_core
+    PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    -Wconversion
+    -Wshadow
+)
 
-find_library(log-lib log)
-target_link_libraries(freecad_android_core PRIVATE ${log-lib})
+target_include_directories(
+    freecad_android_core
+    PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${OCCT_INCLUDE_DIR}"
+)
+
+find_library(ANDROID_LOG_LIBRARY log REQUIRED)
+find_library(ANDROID_LIBRARY android REQUIRED)
+
+target_link_libraries(
+    freecad_android_core
+    PRIVATE
+    ${OCCT_IMPORTED_TARGETS}
+    ${ANDROID_LOG_LIBRARY}
+    ${ANDROID_LIBRARY}
+)
