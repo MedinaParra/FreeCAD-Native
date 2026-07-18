@@ -1,21 +1,51 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# FreeCAD Android Native
 
-# Run and deploy your AI Studio app
+Prototipo Android offline para visualizar geometrías 3D y avanzar hacia una integración nativa de FreeCAD.
 
-This contains everything you need to run your app locally.
+## Rama principal preparada para Google AI Studio
 
-View your app in AI Studio: https://ai.studio/apps/b59c4d26-3b61-40ca-8cfe-3cc957ee14e1
+La rama `main` está configurada para abrirse y ejecutarse en Google AI Studio sin NDK ni C++.
 
-## Run Locally
+Características actuales:
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+- Kotlin y Jetpack Compose.
+- Una sola actividad y un solo módulo `app`.
+- Visor OpenGL ES 3.0.
+- Rotación orbital y zoom.
+- Backend geométrico local de demostración.
+- Sin permiso de Internet.
+- Sin Gemini API, Firebase, Retrofit, OkHttp, Room ni secretos.
+- Sin configuración manual de keystore.
 
+## Importar en Google AI Studio
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+1. Crea una nueva aplicación Android desde un repositorio de GitHub.
+2. Selecciona `MedinaParra/FreeCAD-Native`.
+3. Selecciona la rama `main`.
+4. Mantén `freecad.native.enabled=false` en `gradle.properties`.
+5. Ejecuta la vista previa.
+
+Resultado esperado: la app abre en modo simulador y muestra una caja 3D que puede rotarse y ampliarse.
+
+## Alcance real
+
+Esta rama todavía no incorpora OpenCASCADE, FreeCAD Core, CPython, STEP, IGES ni FCStd. El objetivo inmediato de `main` es mantener una base Android estable y editable en AI Studio. La migración JNI/C++ debe trabajarse en una rama o build separado con Android Studio y Android NDK.
+
+## Estructura principal
+
+```text
+app/src/main/java/com/medinaparra/freecadandroid/
+├── MainActivity.kt
+├── backend/
+├── model/
+├── ui/
+└── viewer/
+```
+
+## Estado
+
+- Interfaz Android: funcional.
+- Visor 3D: funcional.
+- Backend FreeCAD real: pendiente.
+- Macros Python reales: pendientes.
+- Importación STEP/FCStd: pendiente.
