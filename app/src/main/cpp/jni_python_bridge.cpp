@@ -5,9 +5,11 @@
 #include <jni.h>
 #include <android/log.h>
 
+#include <array>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -49,11 +51,11 @@ jobject makeMacroPayload(
     const fcandroid::MacroExecutionResult& execution,
     const fcandroid::MeshData* mesh) {
     const std::vector<float> emptyVertices;
-    const std::vector<std::uint32_t> emptyIndices;
+    const std::vector<std::int32_t> emptyIndices;
     const std::array<float, 6> emptyBounds {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
 
     const std::vector<float>& verticesData = mesh != nullptr ? mesh->vertices : emptyVertices;
-    const std::vector<std::uint32_t>& indicesData = mesh != nullptr ? mesh->indices : emptyIndices;
+    const std::vector<std::int32_t>& indicesData = mesh != nullptr ? mesh->indices : emptyIndices;
     const std::array<float, 6>& boundsData = mesh != nullptr ? mesh->bounds : emptyBounds;
 
     jfloatArray vertices = env->NewFloatArray(static_cast<jsize>(verticesData.size()));
@@ -122,7 +124,11 @@ Java_com_medinaparra_freecadandroid_nativebridge_NativeCadBridge_nativeInitializ
         fcandroid::PythonRuntime& runtime = fcandroid::PythonRuntime::instance();
         runtime.initialize(toString(env, pythonHome));
         const std::string version = runtime.version();
-        __android_log_print(ANDROID_LOG_INFO, kLogTag, "Embedded Python initialized: %s", version.c_str());
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "Embedded Python initialized: %s",
+            version.c_str());
         return env->NewStringUTF(version.c_str());
     } catch (...) {
         throwJava(env, currentExceptionMessage());
