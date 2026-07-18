@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [native-device-test]
+  pull_request:
+    branches: [main]
 
 jobs:
   build:
