@@ -32,6 +32,8 @@ fun MainScreenNative() {
             NativeBoxBridge.createScene() to NativeBoxBridge.buildInfo()
         }
     }
+    val nativeData = nativeResult.getOrNull()
+    val nativeError = nativeResult.exceptionOrNull()
 
     Surface(modifier = Modifier.fillMaxSize(), color = Color(0xFF121216)) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -49,22 +51,20 @@ fun MainScreenNative() {
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = if (nativeResult.isSuccess) "NATIVE C++ ACTIVO" else "ERROR CARGANDO NDK",
-                    color = if (nativeResult.isSuccess) Color(0xFF72E39A) else Color(0xFFFF7B7B),
+                    text = if (nativeData != null) "NATIVE C++ ACTIVO" else "ERROR CARGANDO NDK",
+                    color = if (nativeData != null) Color(0xFF72E39A) else Color(0xFFFF7B7B),
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = nativeResult.fold(
-                        onSuccess = { it.second },
-                        onFailure = { it.stackTraceToString() }
-                    ),
+                    text = nativeData?.second ?: nativeError?.stackTraceToString().orEmpty(),
                     color = Color(0xFFB9B6C5),
                     fontFamily = FontFamily.Monospace,
                     style = MaterialTheme.typography.bodySmall
                 )
             }
 
-            nativeResult.onSuccess { (mesh, _) ->
+            if (nativeData != null) {
+                val mesh = nativeData.first
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     AndroidView(
                         factory = { context ->
@@ -81,9 +81,7 @@ fun MainScreenNative() {
                     Text("12 triángulos", color = Color.White)
                     Text("Origen: C++", color = Color(0xFF72E39A))
                 }
-            }
-
-            nativeResult.onFailure {
+            } else {
                 Text(
                     text = "La biblioteca libfreecad_android_core.so no pudo ejecutarse en este dispositivo.",
                     color = Color.White,
