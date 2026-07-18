@@ -7,6 +7,11 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,6 +33,22 @@ jobs:
           chmod +x gradlew
           set -o pipefail
           ./gradlew :app:assembleDebug --stacktrace 2>&1 | tee native-build.log
+      - name: Report native build failure
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const log = fs.existsSync('native-build.log')
+              ? fs.readFileSync('native-build.log', 'utf8')
+              : 'native-build.log was not created';
+            const tail = log.slice(-18000);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## Native build failure\n\n\`\`\`text\n${tail}\n\`\`\``
+            });
       - name: Upload native build log
         if: always()
         uses: actions/upload-artifact@v4
