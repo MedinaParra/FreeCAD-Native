@@ -1,6 +1,6 @@
 {
   "name": "FreeCADAndroidNative",
-  "description": "FreeCAD Android Native base with OpenGL ES 3.0 3D viewer.",
+  "description": "Offline Android CAD prototype with an OpenGL ES 3.0 geometry viewer and local Kotlin backend.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": []
 }
