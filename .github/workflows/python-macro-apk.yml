@@ -1,0 +1,10 @@
+name: Legacy Python macro APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  legacy-info:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Superseded by step-import-apk.yml on the STEP import branch"

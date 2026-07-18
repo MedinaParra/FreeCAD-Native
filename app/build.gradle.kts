@@ -6,14 +6,37 @@ plugins {
 android {
     namespace = "com.medinaparra.freecadandroid"
     compileSdk = 36
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "com.medinaparra.freecadandroid"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 7
+        versionName = "0.6.0-step-import"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += listOf("-std=c++17", "-Wall", "-Wextra", "-Wpedantic")
+                arguments += listOf(
+                    "-DANDROID_STL=c++_shared",
+                    "-DOCCT_INSTALL_ROOT=${rootProject.projectDir.absolutePath}/.deps/occt",
+                    "-DPYTHON_INSTALL_ROOT=${rootProject.projectDir.absolutePath}/.deps/python"
+                )
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildTypes {
@@ -34,6 +57,17 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    packaging {
+        jniLibs { useLegacyPackaging = false }
+        resources.excludes += setOf(
+            "META-INF/DEPENDENCIES",
+            "META-INF/LICENSE",
+            "META-INF/LICENSE.txt",
+            "META-INF/NOTICE",
+            "META-INF/NOTICE.txt"
+        )
     }
 
     testOptions {
