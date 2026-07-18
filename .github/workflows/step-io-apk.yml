@@ -146,7 +146,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .deps/python/${{ matrix.abi }}
-          key: cpython-${{ env.CPYTHON_TAG }}-android24-${{ matrix.abi }}-v1
+          key: cpython-${{ env.CPYTHON_TAG }}-android24-${{ matrix.abi }}-step-v2
       - name: Build CPython when cache is absent
         if: steps.cache-python.outputs.cache-hit != 'true'
         env:
@@ -158,6 +158,7 @@ jobs:
           tar -xzf .deps/src/cpython.tar.gz -C .deps/src
           mv ".deps/src/cpython-${CPYTHON_TAG#v}" .deps/src/cpython
           cd .deps/src/cpython/Android
+          python3 android.py build -- --without-ensurepip
           python3 android.py build "${{ matrix.host }}" -- --without-ensurepip
           cd "${GITHUB_WORKSPACE}"
           mkdir -p ".deps/python/${{ matrix.abi }}"
