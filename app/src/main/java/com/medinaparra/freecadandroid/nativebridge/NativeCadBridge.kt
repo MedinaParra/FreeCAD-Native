@@ -23,13 +23,52 @@ data class NativeMeshPayload(
     )
 }
 
+data class NativeMacroPayload(
+    val vertices: FloatArray,
+    val indices: IntArray,
+    val bounds: FloatArray,
+    val success: Boolean,
+    val documentId: Long,
+    val output: String,
+    val error: String,
+    val summary: String
+) {
+    init {
+        require(bounds.size == 6) { "Native bounds must contain six values" }
+    }
+
+    fun toSceneMesh(): SceneMesh {
+        check(success) { error.ifBlank { "The Python macro did not complete" } }
+        check(vertices.isNotEmpty() && indices.isNotEmpty()) {
+            "The Python macro produced no visible triangulated geometry"
+        }
+        return SceneMesh(
+            vertices = vertices,
+            indices = indices,
+            minX = bounds[0],
+            minY = bounds[1],
+            minZ = bounds[2],
+            maxX = bounds[3],
+            maxY = bounds[4],
+            maxZ = bounds[5]
+        )
+    }
+}
+
 data class NativeCadScene(
     val mesh: SceneMesh,
     val buildInfo: String,
     val documentSummary: String
 )
 
-/** JNI facade for the OCCT-backed document and geometry core. */
+data class NativeMacroScene(
+    val mesh: SceneMesh,
+    val pythonVersion: String,
+    val output: String,
+    val documentSummary: String
+)
+
+/** JNI facade for the OCCT-backed document, geometry and embedded Python core. */
 object NativeCadBridge {
     init {
         System.loadLibrary("freecad_android_core")
@@ -104,17 +143,45 @@ object NativeCadBridge {
         angularDeflection: Double
     ): NativeMeshPayload
 
-    /**
-     * Creates a parametric document, executes BRep cuts/fusions, validates it and tessellates it.
-     * The document is closed after the mesh and diagnostics have been copied to Kotlin.
-     */
+    external fun nativeInitializePython(pythonHome: String): String
+    external fun nativeRunMacro(
+        sourceCode: String,
+        linearDeflection: Double,
+        angularDeflection: Double
+    ): NativeMacroPayload
+
+    fun runPythonMacro(
+        pythonHome: String,
+        sourceCode: String,
+        linearDeflection: Double = 0.05,
+        angularDeflection: Double = 0.30
+    ): NativeMacroScene {
+        val pythonVersion = nativeInitializePython(pythonHome)
+        val payload = nativeRunMacro(sourceCode, linearDeflection, angularDeflection)
+        check(payload.success) {
+            buildString {
+                append(payload.error.ifBlank { "Python macro execution failed" })
+                if (payload.output.isNotBlank()) {
+                    append("\n\nOutput:\n")
+                    append(payload.output)
+                }
+            }
+        }
+        return NativeMacroScene(
+            mesh = payload.toSceneMesh(),
+            pythonVersion = pythonVersion,
+            output = payload.output,
+            documentSummary = payload.summary
+        )
+    }
+
+    /** Retained as a direct C++/OCCT diagnostic independent of Python. */
     fun createOcctDemoScene(): NativeCadScene {
         val documentId = nativeCreateDocument("OCCT Android Document")
         check(documentId != 0L) { "The native core did not create a document" }
 
         try {
             val base = nativeAddBox(documentId, "Base", 6.0, 4.0, 1.2)
-
             val holeA = nativeAddCylinder(documentId, "MountingHoleA", 0.35, 1.6)
             nativeSetPlacement(
                 documentId, holeA,
