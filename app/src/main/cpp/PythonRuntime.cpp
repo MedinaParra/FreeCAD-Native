@@ -5,6 +5,7 @@
 
 #include <Python.h>
 
+#include <algorithm>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -13,6 +14,8 @@ namespace fcandroid {
 namespace {
 
 std::once_flag moduleRegistrationFlag;
+constexpr std::size_t kMaxMacroSourceBytes = 4U * 1024U * 1024U;
+constexpr Py_ssize_t kMaxCapturedOutputBytes = 1024 * 1024;
 
 std::runtime_error statusError(const PyStatus& status, const char* fallback) {
     return std::runtime_error(status.err_msg != nullptr ? status.err_msg : fallback);
@@ -58,7 +61,11 @@ std::string objectString(PyObject* object) {
     const char* utf8 = PyUnicode_AsUTF8AndSize(value, &size);
     std::string result;
     if (utf8 != nullptr) {
-        result.assign(utf8, static_cast<std::size_t>(size));
+        const Py_ssize_t accepted = std::min(size, kMaxCapturedOutputBytes);
+        result.assign(utf8, static_cast<std::size_t>(accepted));
+        if (size > kMaxCapturedOutputBytes) {
+            result += "\n[output truncated at 1 MiB]";
+        }
     } else {
         PyErr_Clear();
     }
@@ -160,6 +167,12 @@ MacroExecutionResult PythonRuntime::execute(const std::string& sourceCode) {
     }
     if (sourceCode.empty()) {
         throw std::invalid_argument("Macro source code is empty");
+    }
+    if (sourceCode.size() > kMaxMacroSourceBytes) {
+        throw std::invalid_argument("Macro source exceeds the 4 MiB execution limit");
+    }
+    if (sourceCode.find('\0') != std::string::npos) {
+        throw std::invalid_argument("Macro source contains a null byte");
     }
 
     MacroExecutionResult execution;
