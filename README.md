@@ -49,3 +49,7 @@ app/src/main/java/com/medinaparra/freecadandroid/
 - Backend FreeCAD real: pendiente.
 - Macros Python reales: pendientes.
 - Importación STEP/FCStd: pendiente.
+
+## Desarrollo nativo 0.7
+
+La rama `native-step-io` contiene el core Android con OpenCASCADE, CPython, importación STEP, selección de `.FCMacro` y lectura inicial de geometría BREP desde `.FCStd`. El repositorio público permite ejecutar la validación mediante GitHub-hosted runners.
