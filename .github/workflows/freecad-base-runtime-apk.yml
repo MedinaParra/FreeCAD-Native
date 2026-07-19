@@ -181,6 +181,9 @@ jobs:
           screen = Path('app/src/main/java/com/medinaparra/freecadandroid/ui/MainScreenFiles.kt')
           text = screen.read_text()
           text = text.replace(
+              'TextStyle(FontFamily.Monospace, fontSize = 12.sp)',
+              'TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp)')
+          text = text.replace(
               'import com.medinaparra.freecadandroid.nativebridge.NativeCadBridge',
               'import com.medinaparra.freecadandroid.nativebridge.FreeCadBaseBridge\n'
               'import com.medinaparra.freecadandroid.nativebridge.NativeCadBridge')
