@@ -6,6 +6,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -124,6 +125,63 @@ Java_com_medinaparra_freecadandroid_nativebridge_NativeFreeCadFileBridge_nativeI
             toStringVector(env, localPaths),
             linearDeflection,
             angularDeflection);
+        return makePayload(env, result.mesh, result.summary);
+    } catch (...) {
+        throwJava(env, exceptionMessage());
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_medinaparra_freecadandroid_nativebridge_NativeFreeCadFileBridge_nativeImportBrepObjects(
+    JNIEnv* env,
+    jobject,
+    jobjectArray localPaths,
+    jobjectArray objectNames,
+    jdoubleArray placementValues,
+    jbooleanArray visibilityValues,
+    jdouble linearDeflection,
+    jdouble angularDeflection) {
+    try {
+        const std::vector<std::string> paths = toStringVector(env, localPaths);
+        const std::vector<std::string> names = toStringVector(env, objectNames);
+        if (paths.empty() || paths.size() != names.size()) {
+            throw std::invalid_argument("FCStd object paths and names must have equal non-zero sizes");
+        }
+        if (placementValues == nullptr || visibilityValues == nullptr) {
+            throw std::invalid_argument("FCStd object placement or visibility data is missing");
+        }
+        const jsize objectCount = static_cast<jsize>(paths.size());
+        if (env->GetArrayLength(placementValues) != objectCount * 7 ||
+            env->GetArrayLength(visibilityValues) != objectCount) {
+            throw std::invalid_argument("FCStd object metadata array size is invalid");
+        }
+
+        std::vector<jdouble> placements(static_cast<std::size_t>(objectCount) * 7U);
+        std::vector<jboolean> visibilities(static_cast<std::size_t>(objectCount));
+        env->GetDoubleArrayRegion(
+            placementValues, 0, static_cast<jsize>(placements.size()), placements.data());
+        env->GetBooleanArrayRegion(visibilityValues, 0, objectCount, visibilities.data());
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            throw std::runtime_error("Unable to read FCStd object metadata arrays");
+        }
+
+        std::vector<fcandroid::BrepObjectInput> objects;
+        objects.reserve(paths.size());
+        for (std::size_t index = 0; index < paths.size(); ++index) {
+            fcandroid::BrepObjectInput object;
+            object.path = paths[index];
+            object.name = names[index];
+            for (std::size_t value = 0; value < 7U; ++value) {
+                object.placement[value] = placements[index * 7U + value];
+            }
+            object.visible = visibilities[index] == JNI_TRUE;
+            objects.push_back(std::move(object));
+        }
+
+        const fcandroid::BrepImportResult result = fcandroid::BrepIo::importObjects(
+            objects, linearDeflection, angularDeflection);
         return makePayload(env, result.mesh, result.summary);
     } catch (...) {
         throwJava(env, exceptionMessage());
