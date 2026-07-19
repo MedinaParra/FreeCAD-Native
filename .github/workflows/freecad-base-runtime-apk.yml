@@ -501,6 +501,7 @@ jobs:
           grep -q 'makePolygon' app/src/main/python/Part.py
           grep -q 'FreeCADCore.install' app/src/main/python/FreeCAD.py
           python3 -m py_compile app/src/main/python/*.py
+          python3 tests/solidfreecad_contract.py
 
       - name: Test house macro API compatibility
         run: |
