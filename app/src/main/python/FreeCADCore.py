@@ -2,6 +2,10 @@
 from __future__ import annotations
 import ast, copy, math
 
+_MAX_EXPRESSION_CHARS = 4096
+_MAX_EXPRESSION_NODES = 128
+_MAX_POWER_ABS = 32.0
+
 _TYPES = {
  "App::PropertyString":"", "App::PropertyBool":False, "App::PropertyInteger":0,
  "App::PropertyFloat":0.0, "App::PropertyLength":0.0, "App::PropertyDistance":0.0,
@@ -87,7 +91,10 @@ def _coerce(app,t,v):
   if any(not isinstance(x,app.DocumentObject) for x in values): raise TypeError("Expected DocumentObject list")
   return values
  if t=="App::PropertyStringList": return [str(x) for x in v]
- if t=="App::PropertyFloatList": return [float(x) for x in v]
+ if t=="App::PropertyFloatList":
+  values=[float(x) for x in v]
+  if any(not math.isfinite(x) for x in values): raise ValueError("App::PropertyFloatList requires finite values")
+  return values
  if t=="App::PropertyIntegerList": return [int(x) for x in v]
  raise NotImplementedError(f"Property type {t!r} is not supported")
 
@@ -102,27 +109,65 @@ def _links(obj):
  if obj.TypeId=="App::DocumentObjectGroup": result.extend(obj._fc_group)
  return list(dict.fromkeys(result))
 
-def _eval(doc,text):
- tree=ast.parse(str(text),mode="eval")
+def _parse_expression(text):
+ source=str(text)
+ if not source.strip(): raise ValueError("Expression must not be empty")
+ if len(source)>_MAX_EXPRESSION_CHARS: raise ValueError("Expression exceeds the 4096 character limit")
+ tree=ast.parse(source,mode="eval")
+ if sum(1 for _ in ast.walk(tree))>_MAX_EXPRESSION_NODES:
+  raise ValueError("Expression is too complex")
+ return tree
+
+def _eval(doc,text,tree=None):
+ tree=_parse_expression(text) if tree is None else tree
  def run(n):
   if isinstance(n,ast.Expression): return run(n.body)
-  if isinstance(n,ast.Constant) and isinstance(n.value,(int,float)): return n.value
+  if isinstance(n,ast.Constant) and isinstance(n.value,(int,float)) and not isinstance(n.value,bool): return n.value
   if isinstance(n,ast.Name):
    if n.id=="pi": return math.pi
    obj=doc.getObject(n.id)
    if obj is None: raise NameError(n.id)
    return obj
-  if isinstance(n,ast.Attribute): return getattr(run(n.value),n.attr)
+  if isinstance(n,ast.Attribute):
+   if n.attr.startswith("_"): raise ValueError("Private attributes are not allowed in expressions")
+   return getattr(run(n.value),n.attr)
   if isinstance(n,ast.UnaryOp): return -run(n.operand) if isinstance(n.op,ast.USub) else +run(n.operand)
   if isinstance(n,ast.BinOp):
    a,b=run(n.left),run(n.right)
-   if isinstance(n.op,ast.Add): return a+b
-   if isinstance(n.op,ast.Sub): return a-b
-   if isinstance(n.op,ast.Mult): return a*b
-   if isinstance(n.op,ast.Div): return a/b
-   if isinstance(n.op,ast.Pow): return a**b
+   if isinstance(n.op,ast.Add): result=a+b
+   elif isinstance(n.op,ast.Sub): result=a-b
+   elif isinstance(n.op,ast.Mult): result=a*b
+   elif isinstance(n.op,ast.Div): result=a/b
+   elif isinstance(n.op,ast.Pow):
+    if not isinstance(b,(int,float)) or not math.isfinite(float(b)) or abs(float(b))>_MAX_POWER_ABS:
+     raise ValueError("Expression exponent is outside the safe range")
+    result=a**b
+   else: raise ValueError("Unsupported expression operator")
+   if isinstance(result,complex) or (isinstance(result,(int,float)) and not math.isfinite(float(result))):
+    raise ValueError("Expression produced a non-finite result")
+   return result
   raise ValueError("Unsupported expression")
  return run(tree)
+
+def _expression_order(doc):
+ entries={}
+ for obj in doc.Objects:
+  for prop,text in obj._fc_expr.items(): entries[(obj,prop)]=(text,_parse_expression(text))
+ state={}; ordered=[]
+ def visit(key):
+  current=state.get(key,0)
+  if current==2:return
+  if current==1:raise ValueError(f"Expression dependency cycle at {key[0].Name}.{key[1]}")
+  state[key]=1
+  tree=entries[key][1]
+  for node in ast.walk(tree):
+   if not isinstance(node,ast.Attribute) or not isinstance(node.value,ast.Name):continue
+   dependency_object=doc.getObject(node.value.id)
+   dependency=(dependency_object,node.attr)
+   if dependency_object is not None and dependency in entries:visit(dependency)
+  state[key]=2;ordered.append((key[0],key[1],entries[key][0],tree))
+ for key in entries:visit(key)
+ return ordered
 
 def install(app):
  if getattr(app,"_android_core_model_installed",False): return app
@@ -170,6 +215,7 @@ def install(app):
   if text is None:self._fc_expr.pop(prop,None)
   else:
    if prop not in self.PropertiesList:raise AttributeError(prop)
+   _parse_expression(text)
    self._fc_expr[prop]=str(text)
   self.touch()
  def group_add(self,obj):
@@ -220,17 +266,22 @@ def install(app):
    o._fc_expr=dict(x["expr"]);o.touch()
   doc.recompute()
  def recompute(doc,*a,**k):
-  for o in doc.Objects:
-   for p,e in list(o._fc_expr.items()):setattr(o,p,_eval(doc,e))
-  for o in doc.Objects:
-   if o.TypeId in _NON_GEOM:continue
-   if o.TypeId=="Part::Feature" and o._shape_spec is None:continue
-   o._ensure_materialized();o._sync_placement()
-   if o._id:app._native.set_visibility(doc._id,o._id,o.Visibility)
-  app._native.set_active_document(doc._id);ok=bool(app._native.recompute(doc._id))
-  if ok:
-   for o in doc.Objects:o.purgeTouched()
-  return ok
+  ordered=_expression_order(doc)
+  previous=[(o,p,copy.deepcopy(getattr(o,p))) for o,p,_,_ in ordered]
+  try:
+   for o,p,e,tree in ordered:setattr(o,p,_eval(doc,e,tree))
+   for o in doc.Objects:
+    if o.TypeId in _NON_GEOM:continue
+    if o.TypeId=="Part::Feature" and o._shape_spec is None:continue
+    o._ensure_materialized();o._sync_placement()
+    if o._id:app._native.set_visibility(doc._id,o._id,o.Visibility)
+   app._native.set_active_document(doc._id);ok=bool(app._native.recompute(doc._id))
+   if not ok:raise RuntimeError(app._native.last_error(doc._id) or "Native recompute failed")
+  except Exception:
+   for o,p,value in reversed(previous):setattr(o,p,value)
+   raise
+  for o in doc.Objects:o.purgeTouched()
+  return True
  D.recompute=recompute
  D.findObjects=lambda s,Type=None,Label=None:[o for o in s.Objects if (not Type or o.isDerivedFrom(Type)) and (not Label or o.Label==Label)]
  D.getObjectsByLabel=lambda s,l:[o for o in s.Objects if o.Label==str(l)]
