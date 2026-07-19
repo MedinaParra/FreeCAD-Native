@@ -12,6 +12,20 @@ import math
 import FreeCAD as App
 
 
+def _finite(value, name):
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{name} must be finite")
+    return result
+
+
+def _positive(value, name):
+    result = _finite(value, name)
+    if result <= 0.0:
+        raise ValueError(f"{name} must be positive")
+    return result
+
+
 @dataclass
 class Shape:
     _kind: str
@@ -55,6 +69,16 @@ class Shape:
         result.translate(vector)
         return result
 
+    @property
+    def ShapeType(self):
+        return "Solid"
+
+    def isValid(self):
+        return True
+
+    def isClosed(self):
+        return True
+
     def fuse(self, other):
         return _boolean_shape("Part::Fuse", self, other)
 
@@ -81,6 +105,8 @@ class Shape:
 def _boolean_shape(kind, left, right):
     if not isinstance(left, Shape) or not isinstance(right, Shape):
         raise TypeError("Boolean operations require two Part.Shape values")
+    if left is right:
+        raise ValueError("Boolean operations require two distinct shapes")
     return Shape(kind, (), App.Placement(), left, right)
 
 
@@ -106,18 +132,19 @@ def makeBox(length, width, height, pnt=None, dir=None):
     _require_positive_z(dir, "makeBox")
     return Shape(
         "Part::Box",
-        (float(length), float(width), float(height)),
+        (_positive(length, "length"), _positive(width, "width"), _positive(height, "height")),
         _placement(pnt),
     )
 
 
 def makeCylinder(radius, height, pnt=None, dir=None, angle=360.0):
-    if float(angle) != 360.0:
+    angle = _finite(angle, "angle")
+    if angle != 360.0:
         raise NotImplementedError("Partial cylinders are not supported yet")
     _require_positive_z(dir, "makeCylinder")
     return Shape(
         "Part::Cylinder",
-        (float(radius), float(height)),
+        (_positive(radius, "radius"), _positive(height, "height")),
         _placement(pnt),
     )
 
@@ -125,27 +152,28 @@ def makeCylinder(radius, height, pnt=None, dir=None, angle=360.0):
 def makeSphere(radius, pnt=None, angle1=-90.0, angle2=90.0, angle3=360.0):
     if (float(angle1), float(angle2), float(angle3)) != (-90.0, 90.0, 360.0):
         raise NotImplementedError("Partial spheres are not supported yet")
-    return Shape("Part::Sphere", (float(radius),), _placement(pnt))
+    return Shape("Part::Sphere", (_positive(radius, "radius"),), _placement(pnt))
 
 
 def makeCone(radius1, radius2, height, pnt=None, dir=None, angle=360.0):
-    if float(angle) != 360.0:
+    angle = _finite(angle, "angle")
+    if angle != 360.0:
         raise NotImplementedError("Partial cones are not supported yet")
     _require_positive_z(dir, "makeCone")
     return Shape(
         "Part::Cone",
-        (float(radius1), float(radius2), float(height)),
+        (_positive(radius1, "radius1"), _finite(radius2, "radius2"), _positive(height, "height")),
         _placement(pnt),
     )
 
 
 def makeTorus(radius1, radius2, pnt=None, dir=None, angle1=0.0, angle2=360.0, angle3=360.0):
     _require_positive_z(dir, "makeTorus")
-    if (float(angle1), float(angle2), float(angle3)) != (0.0, 360.0, 360.0):
+    if (_finite(angle1, "angle1"), _finite(angle2, "angle2"), _finite(angle3, "angle3")) != (0.0, 360.0, 360.0):
         raise NotImplementedError("Partial toruses are not supported yet")
     return Shape(
         "Part::Torus",
-        (float(radius1), float(radius2)),
+        (_positive(radius1, "radius1"), _positive(radius2, "radius2")),
         _placement(pnt),
     )
 
