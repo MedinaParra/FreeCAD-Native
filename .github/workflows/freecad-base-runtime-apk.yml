@@ -137,6 +137,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import textwrap
 
           def replace_once(text, old, new, label):
               if new in text:
@@ -336,7 +337,7 @@ jobs:
           part = Path('app/src/main/python/Part.py')
           source = part.read_text()
           if '_android_house_macro_support' not in source:
-              source += r'''
+              source += textwrap.dedent(r'''
 
           # Extended compatibility for generated architectural macros.
           _android_house_macro_support = True
@@ -469,7 +470,7 @@ jobs:
                       "FREECAD BASE NO DISPONIBLE\n${error.message ?: error::class.java.simpleName}"
                   }
           }
-          '''.replace('          ', ''))
+          ''')
 
           screen = Path('app/src/main/java/com/medinaparra/freecadandroid/ui/MainScreenFiles.kt')
           text = screen.read_text()
