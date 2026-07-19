@@ -14,13 +14,44 @@ from typing import Any
 import _freecad_native as _native
 
 
+def _finite_float(value, label="value"):
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{label} must be finite")
+    return result
+
+
 class Vector:
-    __slots__ = ("x", "y", "z")
+    __slots__ = ("_x", "_y", "_z")
 
     def __init__(self, x: float = 0.0, y: float = 0.0, z: float = 0.0):
-        self.x = float(x)
-        self.y = float(y)
-        self.z = float(z)
+        self._x = _finite_float(x, "Vector.x")
+        self._y = _finite_float(y, "Vector.y")
+        self._z = _finite_float(z, "Vector.z")
+
+    @property
+    def x(self):
+        return self._x
+
+    @x.setter
+    def x(self, value):
+        self._x = _finite_float(value, "Vector.x")
+
+    @property
+    def y(self):
+        return self._y
+
+    @y.setter
+    def y(self, value):
+        self._y = _finite_float(value, "Vector.y")
+
+    @property
+    def z(self):
+        return self._z
+
+    @z.setter
+    def z(self, value):
+        self._z = _finite_float(value, "Vector.z")
 
     @property
     def X(self):
@@ -28,7 +59,7 @@ class Vector:
 
     @X.setter
     def X(self, value):
-        self.x = float(value)
+        self.x = value
 
     @property
     def Y(self):
@@ -36,7 +67,7 @@ class Vector:
 
     @Y.setter
     def Y(self, value):
-        self.y = float(value)
+        self.y = value
 
     @property
     def Z(self):
@@ -44,7 +75,7 @@ class Vector:
 
     @Z.setter
     def Z(self, value):
-        self.z = float(value)
+        self.z = value
 
     @property
     def Length(self):
@@ -69,26 +100,26 @@ class Rotation:
         if not args:
             self.Q = (0.0, 0.0, 0.0, 1.0)
         elif len(args) == 4:
-            qx, qy, qz, qw = (float(value) for value in args)
+            qx, qy, qz, qw = (
+                _finite_float(value, "Rotation quaternion") for value in args
+            )
             norm = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw)
             if norm <= 1.0e-15:
-                self.Q = (0.0, 0.0, 0.0, 1.0)
-            else:
-                self.Q = (qx / norm, qy / norm, qz / norm, qw / norm)
+                raise ValueError("Rotation quaternion must not be null")
+            self.Q = (qx / norm, qy / norm, qz / norm, qw / norm)
         elif len(args) == 2 and isinstance(args[0], Vector):
             axis = args[0]
-            angle = math.radians(float(args[1])) * 0.5
+            angle = math.radians(_finite_float(args[1], "Rotation angle")) * 0.5
             length = axis.Length
             if length <= 1.0e-15:
-                self.Q = (0.0, 0.0, 0.0, 1.0)
-            else:
-                scale = math.sin(angle) / length
-                self.Q = (
-                    axis.x * scale,
-                    axis.y * scale,
-                    axis.z * scale,
-                    math.cos(angle),
-                )
+                raise ValueError("Rotation axis must not be null")
+            scale = math.sin(angle) / length
+            self.Q = (
+                axis.x * scale,
+                axis.y * scale,
+                axis.z * scale,
+                math.cos(angle),
+            )
         else:
             raise TypeError("Rotation expects (), (qx, qy, qz, qw), or (axis, angleDegrees)")
 
@@ -100,8 +131,16 @@ class Placement:
     __slots__ = ("_base", "_rotation", "_callback")
 
     def __init__(self, base: Vector | None = None, rotation: Rotation | None = None):
-        self._base = base.copy() if isinstance(base, Vector) else Vector()
-        self._rotation = rotation if isinstance(rotation, Rotation) else Rotation()
+        self._base = (
+            base.copy()
+            if isinstance(base, Vector)
+            else Vector(*base) if base is not None else Vector()
+        )
+        self._rotation = (
+            Rotation(*rotation.Q)
+            if isinstance(rotation, Rotation)
+            else Rotation(*rotation) if rotation is not None else Rotation()
+        )
         self._callback = None
 
     @property
@@ -251,6 +290,8 @@ class DocumentObject:
             raise ValueError("A boolean object cannot use itself as Base")
         if value is not None and value._document is not self._document:
             raise ValueError("Boolean Base must belong to the same document")
+        if value is not None and value._depends_on(self):
+            raise ValueError("Boolean Base would create a dependency cycle")
         object.__setattr__(self, "_base_object", value)
         self._sync_boolean()
 
@@ -268,6 +309,8 @@ class DocumentObject:
             raise ValueError("Boolean Tool must belong to the same document")
         if value is not None and value is self._base_object:
             raise ValueError("Boolean Base and Tool must be different objects")
+        if value is not None and value._depends_on(self):
+            raise ValueError("Boolean Tool would create a dependency cycle")
         object.__setattr__(self, "_tool_object", value)
         self._sync_boolean()
 
@@ -294,14 +337,12 @@ class DocumentObject:
             return
         index_map = _PARAMETER_INDEX.get(self._type_id, {})
         if name in index_map:
-            numeric = float(value)
-            if not math.isfinite(numeric):
-                raise ValueError(f"{name} must be finite")
+            numeric = _finite_float(value, name)
             if numeric <= 0.0 and not (self._type_id == "Part::Cone" and name == "Radius2" and numeric == 0.0):
                 raise ValueError(f"{name} must be positive")
-            if self._type_id == "Part::Torus" and name == "Radius2":
+            if self._type_id == "Part::Torus":
                 major = numeric if name == "Radius1" else self._properties.get("Radius1", 0.0)
-                minor = numeric
+                minor = numeric if name == "Radius2" else self._properties.get("Radius2", 0.0)
                 if minor >= major:
                     raise ValueError("Torus Radius2 must be smaller than Radius1")
             self._properties[name] = numeric
@@ -315,6 +356,19 @@ class DocumentObject:
             descriptor.__set__(self, value)
             return
         object.__setattr__(self, name, value)
+
+    def _depends_on(self, target, visiting=None):
+        if self is target:
+            return True
+        visiting = set() if visiting is None else visiting
+        marker = id(self)
+        if marker in visiting:
+            return False
+        visiting.add(marker)
+        for operand in (self._base_object, self._tool_object):
+            if operand is not None and operand._depends_on(target, visiting):
+                return True
+        return False
 
     def _sync_placement(self):
         if not self._id:

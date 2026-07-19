@@ -26,6 +26,13 @@ def _positive(value, name):
     return result
 
 
+def _nonnegative(value, name):
+    result = _finite(value, name)
+    if result < 0.0:
+        raise ValueError(f"{name} must be non-negative")
+    return result
+
+
 @dataclass
 class Shape:
     _kind: str
@@ -74,7 +81,11 @@ class Shape:
         return "Solid"
 
     def isValid(self):
-        return True
+        try:
+            _validate_shape(self, set(), set())
+            return True
+        except (TypeError, ValueError):
+            return False
 
     def isClosed(self):
         return True
@@ -107,7 +118,58 @@ def _boolean_shape(kind, left, right):
         raise TypeError("Boolean operations require two Part.Shape values")
     if left is right:
         raise ValueError("Boolean operations require two distinct shapes")
+    _validate_shape(left, set(), set())
+    _validate_shape(right, set(), set())
     return Shape(kind, (), App.Placement(), left, right)
+
+
+def _validate_shape(shape, visiting, visited):
+    if not isinstance(shape, Shape):
+        raise TypeError("Expected a Part.Shape")
+    marker = id(shape)
+    if marker in visiting:
+        raise ValueError("Part.Shape dependency cycle detected")
+    if marker in visited:
+        return
+    visiting.add(marker)
+    if shape._kind in {"Part::Fuse", "Part::Cut", "Part::Common"}:
+        if shape._left is shape._right:
+            raise ValueError("Boolean operations require two distinct shapes")
+        _validate_shape(shape._left, visiting, visited)
+        _validate_shape(shape._right, visiting, visited)
+    elif shape._kind == "Part::Box":
+        for value, name in zip(shape._params, ("length", "width", "height")):
+            _positive(value, name)
+    elif shape._kind == "Part::Cylinder":
+        _positive(shape._params[0], "radius")
+        _positive(shape._params[1], "height")
+    elif shape._kind == "Part::Sphere":
+        _positive(shape._params[0], "radius")
+    elif shape._kind == "Part::Cone":
+        _positive(shape._params[0], "radius1")
+        _nonnegative(shape._params[1], "radius2")
+        _positive(shape._params[2], "height")
+    elif shape._kind == "Part::Torus":
+        major = _positive(shape._params[0], "radius1")
+        minor = _positive(shape._params[1], "radius2")
+        if minor >= major:
+            raise ValueError("radius2 must be smaller than radius1")
+    elif shape._kind == "Part::Prism":
+        if len(shape._params) != 4:
+            raise ValueError("Invalid prism specification")
+        coordinates, dx, dy, dz = shape._params
+        coordinates = tuple(coordinates)
+        if len(coordinates) < 9 or len(coordinates) % 3:
+            raise ValueError("A prism requires at least three XYZ points")
+        for coordinate in coordinates:
+            _finite(coordinate, "prism coordinate")
+        extrusion = App.Vector(dx, dy, dz)
+        if extrusion.Length <= 1.0e-12:
+            raise ValueError("Prism extrusion vector must not be null")
+    else:
+        raise ValueError(f"Unsupported shape kind {shape._kind!r}")
+    visiting.remove(marker)
+    visited.add(marker)
 
 
 def _placement(base):
@@ -150,7 +212,12 @@ def makeCylinder(radius, height, pnt=None, dir=None, angle=360.0):
 
 
 def makeSphere(radius, pnt=None, angle1=-90.0, angle2=90.0, angle3=360.0):
-    if (float(angle1), float(angle2), float(angle3)) != (-90.0, 90.0, 360.0):
+    angles = (
+        _finite(angle1, "angle1"),
+        _finite(angle2, "angle2"),
+        _finite(angle3, "angle3"),
+    )
+    if angles != (-90.0, 90.0, 360.0):
         raise NotImplementedError("Partial spheres are not supported yet")
     return Shape("Part::Sphere", (_positive(radius, "radius"),), _placement(pnt))
 
@@ -162,7 +229,7 @@ def makeCone(radius1, radius2, height, pnt=None, dir=None, angle=360.0):
     _require_positive_z(dir, "makeCone")
     return Shape(
         "Part::Cone",
-        (_positive(radius1, "radius1"), _finite(radius2, "radius2"), _positive(height, "height")),
+        (_positive(radius1, "radius1"), _nonnegative(radius2, "radius2"), _positive(height, "height")),
         _placement(pnt),
     )
 
@@ -171,9 +238,13 @@ def makeTorus(radius1, radius2, pnt=None, dir=None, angle1=0.0, angle2=360.0, an
     _require_positive_z(dir, "makeTorus")
     if (_finite(angle1, "angle1"), _finite(angle2, "angle2"), _finite(angle3, "angle3")) != (0.0, 360.0, 360.0):
         raise NotImplementedError("Partial toruses are not supported yet")
+    major = _positive(radius1, "radius1")
+    minor = _positive(radius2, "radius2")
+    if minor >= major:
+        raise ValueError("radius2 must be smaller than radius1")
     return Shape(
         "Part::Torus",
-        (_positive(radius1, "radius1"), _positive(radius2, "radius2")),
+        (major, minor),
         _placement(pnt),
     )
 
@@ -181,6 +252,7 @@ def makeTorus(radius1, radius2, pnt=None, dir=None, angle1=0.0, angle2=360.0, an
 def _materialize(shape, document, name, sequence):
     if not isinstance(shape, Shape):
         raise TypeError("Part.show expects a Part.Shape")
+    _validate_shape(shape, set(), set())
 
     if shape._kind in {"Part::Fuse", "Part::Cut", "Part::Common"}:
         left = _materialize(shape._left, document, f"{name}_Base", sequence)
