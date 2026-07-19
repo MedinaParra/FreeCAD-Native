@@ -21,5 +21,6 @@ The runtime remains headless and intentionally excludes the original FreeCAD GUI
 - Edits labels, visibility and XYZ placement for generic shape objects.
 - Saves a new FCStd while preserving workbench-specific properties and unknown archive entries.
 - Validates the format assumptions against official PartDesign, Assembly, BIM and FEM examples from FreeCAD 1.1.1.
+- Contract coverage: 549 objects, 328 BREP shapes, 434 placements and 13 assembly links across official 1.1.1 samples.
 
 Parametric recomputation of arbitrary Sketcher, PartDesign, BIM, FEM and external-workbench objects remains a later milestone; version 0.11 preserves those objects losslessly when applying universal metadata edits.
