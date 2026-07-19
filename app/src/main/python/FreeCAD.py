@@ -247,6 +247,10 @@ class DocumentObject:
     def Base(self, value):
         if value is not None and not isinstance(value, DocumentObject):
             raise TypeError("Boolean Base must be a document object")
+        if value is self:
+            raise ValueError("A boolean object cannot use itself as Base")
+        if value is not None and value._document is not self._document:
+            raise ValueError("Boolean Base must belong to the same document")
         object.__setattr__(self, "_base_object", value)
         self._sync_boolean()
 
@@ -258,6 +262,12 @@ class DocumentObject:
     def Tool(self, value):
         if value is not None and not isinstance(value, DocumentObject):
             raise TypeError("Boolean Tool must be a document object")
+        if value is self:
+            raise ValueError("A boolean object cannot use itself as Tool")
+        if value is not None and value._document is not self._document:
+            raise ValueError("Boolean Tool must belong to the same document")
+        if value is not None and value is self._base_object:
+            raise ValueError("Boolean Base and Tool must be different objects")
         object.__setattr__(self, "_tool_object", value)
         self._sync_boolean()
 
@@ -285,6 +295,15 @@ class DocumentObject:
         index_map = _PARAMETER_INDEX.get(self._type_id, {})
         if name in index_map:
             numeric = float(value)
+            if not math.isfinite(numeric):
+                raise ValueError(f"{name} must be finite")
+            if numeric <= 0.0 and not (self._type_id == "Part::Cone" and name == "Radius2" and numeric == 0.0):
+                raise ValueError(f"{name} must be positive")
+            if self._type_id == "Part::Torus" and name == "Radius2":
+                major = numeric if name == "Radius1" else self._properties.get("Radius1", 0.0)
+                minor = numeric
+                if minor >= major:
+                    raise ValueError("Torus Radius2 must be smaller than Radius1")
             self._properties[name] = numeric
             if self._id:
                 _native.set_parameter(
@@ -411,6 +430,9 @@ class Document:
         return self._by_name.get(str(name))
 
     def recompute(self):
+        names = [obj.Name for obj in self._objects]
+        if len(names) != len(set(names)) or set(names) != set(self._by_name):
+            raise RuntimeError("Document object index is inconsistent")
         for obj in self._objects:
             obj._ensure_materialized()
             obj._sync_placement()
