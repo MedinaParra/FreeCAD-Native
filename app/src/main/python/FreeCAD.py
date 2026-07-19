@@ -13,11 +13,22 @@ from typing import Any
 
 import _freecad_native as _native
 
+_MAX_NAME_BYTES = 1024
+_MAX_DOCUMENT_OBJECTS = 10000
+_MAX_OPEN_DOCUMENTS = 32
+
 
 def _finite_float(value, label="value"):
     result = float(value)
     if not math.isfinite(result):
         raise ValueError(f"{label} must be finite")
+    return result
+
+
+def _validated_name(value, label="Name"):
+    result = str(value)
+    if len(result.encode("utf-8")) > _MAX_NAME_BYTES:
+        raise ValueError(f"{label} exceeds the {_MAX_NAME_BYTES} byte limit")
     return result
 
 
@@ -474,8 +485,10 @@ class DocumentObject:
 
 
 class Document:
+    _MAX_OBJECTS = _MAX_DOCUMENT_OBJECTS
+
     def __init__(self, name: str):
-        self.Name = str(name)
+        self.Name = _validated_name(name, "Document name")
         self.Label = self.Name
         self._id = int(_native.create_document(self.Name))
         self._objects = []
@@ -493,8 +506,10 @@ class Document:
 
     def addObject(self, type_name: str, name: str):
         self._assert_open()
+        if len(self._objects) >= self._MAX_OBJECTS:
+            raise RuntimeError("Document object limit reached")
         type_name = str(type_name)
-        name = self._unique_name(str(name))
+        name = self._unique_name(_validated_name(name, "Object name"))
         native_id = 0
         if type_name in _PRIMITIVES:
             defaults, function_name = _PRIMITIVES[type_name]
@@ -560,7 +575,7 @@ class Document:
         index = 1
         while f"{base}{index:03d}" in self._by_name:
             index += 1
-        return f"{base}{index:03d}"
+        return _validated_name(f"{base}{index:03d}", "Unique object name")
 
     def __getattr__(self, name):
         obj = self._by_name.get(name)
@@ -593,9 +608,11 @@ ActiveDocument = None
 
 def newDocument(name: str = "Unnamed"):
     global ActiveDocument
-    name = str(name or "Unnamed")
+    name = _validated_name(name or "Unnamed", "Document name")
     if name in _documents:
         closeDocument(name)
+    elif len(_documents) >= _MAX_OPEN_DOCUMENTS:
+        raise RuntimeError("Open document limit reached")
     document = Document(name)
     _documents[name] = document
     ActiveDocument = document

@@ -5,6 +5,8 @@ import ast, copy, math
 _MAX_EXPRESSION_CHARS = 4096
 _MAX_EXPRESSION_NODES = 128
 _MAX_POWER_ABS = 32.0
+_MAX_CUSTOM_PROPERTIES = 1024
+_MAX_UNDO_STEPS = 64
 
 _TYPES = {
  "App::PropertyString":"", "App::PropertyBool":False, "App::PropertyInteger":0,
@@ -204,6 +206,7 @@ def install(app):
   if t not in _TYPES: raise NotImplementedError(f"Property type {t!r} is not supported")
   if not name.isidentifier(): raise ValueError("Invalid property name")
   if name in self._fc_defs or name in self._properties:return self
+  if len(self._fc_defs)>=_MAX_CUSTOM_PROPERTIES:raise RuntimeError("Custom property limit reached")
   default=_TYPES[t]
   if t=="App::PropertyVector":default=app.Vector()
   elif t=="App::PropertyPlacement":default=app.Placement()
@@ -251,6 +254,7 @@ def install(app):
  D.__init__=init_doc
  def add_obj(self,t,name):
   self._assert_open()
+  if len(self._objects)>=self._MAX_OBJECTS:raise RuntimeError("Document object limit reached")
   t=str(t)
   if t in _NON_GEOM:
    name=self._unique_name(str(name));obj=app.DocumentObject(self,t,name,0)
@@ -260,24 +264,41 @@ def install(app):
  D.addObject=add_obj
  def remove_obj(self,name_or_object):
   self._assert_open()
+  if self._fc_tx is not None:raise RuntimeError("Object removal is not allowed inside an open transaction")
   target=name_or_object if isinstance(name_or_object,app.DocumentObject) else self._by_name.get(str(name_or_object))
   if target is None:return None
   dependents=[o.Name for o in self.Objects if o is not target and target in _links(o)]
   if dependents:raise RuntimeError(f"Cannot remove {target.Name!r}; referenced by {', '.join(dependents)}")
   return dr(self,target)
  D.removeObject=remove_obj
+ def clone_value(value):
+  if isinstance(value,app.DocumentObject):return value
+  if isinstance(value,app.Vector):return value.copy()
+  if isinstance(value,app.Placement):return value.copy()
+  if isinstance(value,list):return [clone_value(item) for item in value]
+  if isinstance(value,tuple):return tuple(clone_value(item) for item in value)
+  if isinstance(value,dict):return {key:clone_value(item) for key,item in value.items()}
+  return copy.deepcopy(value)
  def snapshot(doc):
-  return [{"name":o.Name,"label":o.Label,"primitive":copy.deepcopy(o._properties),
-   "custom":copy.deepcopy(o._fc_values),"expr":dict(o._fc_expr),
-   "placement":o.Placement.copy(),"visible":o.Visibility} for o in doc.Objects]
+  return [{"object":o,"name":o.Name,"label":o.Label,"primitive":clone_value(o._properties),
+   "defs":clone_value(o._fc_defs),"custom":clone_value(o._fc_values),"expr":dict(o._fc_expr),
+   "modes":dict(o._fc_modes),"group":list(o._fc_group),"base":o.Base,"tool":o.Tool,
+   "shape":o.Shape,"placement":o.Placement.copy(),"visible":o.Visibility} for o in doc.Objects]
  def restore(doc,data):
-  by={x["name"]:x for x in data}
-  for o in doc.Objects:
-   if o.Name not in by:continue
-   x=by[o.Name];o.Label=x["label"];o.Placement=x["placement"];o.Visibility=x["visible"]
+  expected={x["object"] for x in data}
+  for x in data:
+   o=x["object"]
+   if o not in doc._objects:raise RuntimeError("A transaction cannot restore an object removed outside the document API")
+   object.__setattr__(o,"_base_object",x["base"]);object.__setattr__(o,"_tool_object",x["tool"])
+   object.__setattr__(o,"_fc_group",list(x["group"]));object.__setattr__(o,"_fc_defs",clone_value(x["defs"]))
+   object.__setattr__(o,"_fc_modes",dict(x["modes"]));object.__setattr__(o,"_shape_spec",x["shape"])
+   if o.TypeId in {"Part::Fuse","Part::Cut","Part::Common"} and o.Base is not None and o.Tool is not None:o._sync_boolean()
+  for added in reversed([o for o in doc.Objects if o not in expected]):doc.removeObject(added)
+  for x in data:
+   o=x["object"]
+   o.Label=x["label"];o.Placement=x["placement"];o.Visibility=x["visible"]
    for k,v in x["primitive"].items():setattr(o,k,v)
-   for k,v in x["custom"].items():
-    if k in o._fc_defs:o._fc_values[k]=v
+   object.__setattr__(o,"_fc_values",clone_value(x["custom"]))
    o._fc_expr=dict(x["expr"]);o.touch()
   doc.recompute()
  def recompute(doc,*a,**k):
@@ -306,7 +327,9 @@ def install(app):
   s._fc_tid+=1;s._fc_tx=(s._fc_tid,str(name),snapshot(s));return s._fc_tid
  def commit(s):
   if s._fc_tx is None:return 0
-  tid,_,before=s._fc_tx;s._fc_undo.append(before);s._fc_redo.clear();s._fc_tx=None;return tid
+  tid,_,before=s._fc_tx;s._fc_undo.append(before)
+  if len(s._fc_undo)>_MAX_UNDO_STEPS:del s._fc_undo[:-_MAX_UNDO_STEPS]
+  s._fc_redo.clear();s._fc_tx=None;return tid
  def abort(s):
   if s._fc_tx is not None:
    _,_,before=s._fc_tx;s._fc_tx=None;restore(s,before)
@@ -315,7 +338,9 @@ def install(app):
   s._fc_redo.append(snapshot(s));restore(s,s._fc_undo.pop());return True
  def redo(s):
   if not s._fc_redo:return False
-  s._fc_undo.append(snapshot(s));restore(s,s._fc_redo.pop());return True
+  s._fc_undo.append(snapshot(s))
+  if len(s._fc_undo)>_MAX_UNDO_STEPS:del s._fc_undo[:-_MAX_UNDO_STEPS]
+  restore(s,s._fc_redo.pop());return True
  D.openTransaction=open_tx;D.commitTransaction=commit;D.abortTransaction=abort;D.undo=undo;D.redo=redo
  D.clearUndos=lambda s:(s._fc_undo.clear(),s._fc_redo.clear())
  D.TransactionID=property(lambda s:s._fc_tid);D.UndoCount=property(lambda s:len(s._fc_undo));D.RedoCount=property(lambda s:len(s._fc_redo))

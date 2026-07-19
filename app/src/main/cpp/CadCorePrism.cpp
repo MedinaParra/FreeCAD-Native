@@ -15,6 +15,9 @@ std::uint64_t CadCore::addPrism(const std::uint64_t documentId,
     if (profileCoordinates.size() < 9U || profileCoordinates.size() % 3U != 0U) {
         throw std::invalid_argument("A prism profile requires at least three XYZ points");
     }
+    if (profileCoordinates.size() > kMaxPrismCoordinateValues) {
+        throw std::length_error("Prism profile exceeds the 10000 point limit");
+    }
     for (const double value : profileCoordinates) {
         if (!std::isfinite(value)) {
             throw std::invalid_argument("Prism profile contains a non-finite coordinate");
@@ -29,6 +32,8 @@ std::uint64_t CadCore::addPrism(const std::uint64_t documentId,
 
     std::lock_guard<std::mutex> lock(mutex_);
     CadDocument& document = requireDocumentLocked(documentId);
+    ensureObjectCapacity(document);
+    validateName(name);
     const std::uint64_t id = nextObjectId_++;
     CadObject object;
     object.id = id;

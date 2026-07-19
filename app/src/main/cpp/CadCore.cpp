@@ -61,7 +61,11 @@ CadCore& CadCore::instance() {
 }
 
 std::uint64_t CadCore::createDocument(const std::string& name) {
+    validateName(name);
     std::lock_guard<std::mutex> lock(mutex_);
+    if (documents_.size() >= kMaxDocuments) {
+        throw std::length_error("Native document limit reached");
+    }
     const std::uint64_t id = nextDocumentId_++;
     CadDocument document;
     document.id = id;
@@ -335,6 +339,8 @@ std::uint64_t CadCore::addPrimitiveLocked(
     const std::string& name,
     const ObjectKind kind,
     const std::array<double, 4>& parameters) {
+    ensureObjectCapacity(document);
+    validateName(name);
     const std::uint64_t id = nextObjectId_++;
     CadObject object;
     object.id = id;
@@ -352,6 +358,8 @@ std::uint64_t CadCore::addBooleanLocked(
     const ObjectKind kind,
     const std::uint64_t leftId,
     const std::uint64_t rightId) {
+    ensureObjectCapacity(document);
+    validateName(name);
     if (leftId == rightId) {
         throw std::invalid_argument("A boolean operation requires two different objects");
     }

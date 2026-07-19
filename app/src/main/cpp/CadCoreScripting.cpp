@@ -26,6 +26,18 @@ void CadCore::reset() {
     nextObjectId_ = 1;
 }
 
+void CadCore::validateName(const std::string& name) {
+    if (name.size() > kMaxNameBytes) {
+        throw std::length_error("Document or object name exceeds the 1024 byte limit");
+    }
+}
+
+void CadCore::ensureObjectCapacity(const CadDocument& document) {
+    if (document.objects.size() >= kMaxObjectsPerDocument) {
+        throw std::length_error("Native object limit reached for this document");
+    }
+}
+
 void CadCore::removeObject(
     const std::uint64_t documentId,
     const std::uint64_t objectId) {

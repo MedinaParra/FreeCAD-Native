@@ -11,6 +11,10 @@ permissions:
   actions: read
   contents: read
 
+concurrency:
+  group: freecad-base-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   ANDROID_NDK_VERSION: 28.2.13676358
   ANDROID_CMAKE_VERSION: 3.22.1
@@ -329,7 +333,7 @@ jobs:
               '        self.LineColor = (0.1, 0.1, 0.1)\n        self.Transparency = 0\n        self.DisplayMode = "Flat Lines"')
           source = source.replace(
               'return ("0", "5", "0", "Android", _native.kernel_info())',
-              'return ("0", "9", "1", "Android", _native.kernel_info())')
+              'return ("0", "10", "0", "Android", _native.kernel_info())')
           if 'FreeCADCore.install' not in source:
               source += '\n\nimport FreeCADCore as _FreeCADCore\n_FreeCADCore.install(sys.modules[__name__])\n'
           freecad.write_text(source)
@@ -436,6 +440,8 @@ jobs:
           def _compat_materialize_shape_spec(self):
               if self._id or self._shape_spec is None:
                   return
+              if not self._shape_spec.isValid():
+                  raise ValueError("Part::Feature.Shape contains an invalid or cyclic specification")
               native_id = _materialize_spec(self._document, self._shape_spec, self.Name, [0])
               object.__setattr__(self, "_id", native_id)
               App._native.set_visibility(self._document._id, native_id, self._visibility)
@@ -455,8 +461,8 @@ jobs:
               '                    "-DFREECAD_BASE_SOURCE=${rootProject.projectDir.absolutePath}/.deps/freecad/src/Base",\n'
               '                    "-DFREECAD_BASE_GENERATED=${rootProject.projectDir.absolutePath}/.deps/freecad-generated",\n'
               '                    "-DBOOST_HEADER_ROOT=${rootProject.projectDir.absolutePath}/.deps/boost"')
-          text = text.replace('versionCode = 7', 'versionCode = 11')
-          text = text.replace('versionName = "0.6.0-step-io"', 'versionName = "0.9.1-freecad-base-macro-fix"')
+          text = text.replace('versionCode = 7', 'versionCode = 12')
+          text = text.replace('versionName = "0.6.0-step-io"', 'versionName = "0.10.0-freecad-base-hardened"')
           gradle.write_text(text)
 
           bridge = Path('app/src/main/java/com/medinaparra/freecadandroid/nativebridge/FreeCadBaseBridge.kt')
@@ -515,6 +521,7 @@ jobs:
               return counter['value']
           native.create_document = new_id
           native.close_document = lambda *a: None
+          native.remove_object = lambda *a: None
           native.reset = lambda: None
           native.set_active_document = lambda *a: None
           native.add_box = new_id
@@ -596,16 +603,18 @@ jobs:
             'llvm-nm -C "$1" 2>/dev/null | grep -q "Base::Matrix4D::determinant"' _ {} \;
           find app/build -name libfreecad_android_core.so -print -exec sh -c \
             'llvm-nm -C "$1" 2>/dev/null | grep -q "CadCore::addPrism"' _ {} \;
-          cp "${APK}" FreeCAD-Android-Base-Runtime-v0.9.1.apk
-          sha256sum FreeCAD-Android-Base-Runtime-v0.9.1.apk \
-            > FreeCAD-Android-Base-Runtime-v0.9.1.apk.sha256
+          find app/build -name libfreecad_android_core.so -print -exec sh -c \
+            'llvm-nm -C "$1" 2>/dev/null | grep -q "CadCore::removeObject"' _ {} \;
+          cp "${APK}" FreeCAD-Android-Base-Runtime-v0.10.0.apk
+          sha256sum FreeCAD-Android-Base-Runtime-v0.10.0.apk \
+            > FreeCAD-Android-Base-Runtime-v0.10.0.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: freecad-android-base-runtime-v091-apk
+          name: freecad-android-base-runtime-v0100-apk
           path: |
-            FreeCAD-Android-Base-Runtime-v0.9.1.apk
-            FreeCAD-Android-Base-Runtime-v0.9.1.apk.sha256
+            FreeCAD-Android-Base-Runtime-v0.10.0.apk
+            FreeCAD-Android-Base-Runtime-v0.10.0.apk.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -613,7 +622,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: freecad-base-runtime-v091-diagnostics
+          name: freecad-base-runtime-v0100-diagnostics
           path: |
             freecad-base-build.log
             apk-contents.txt

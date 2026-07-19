@@ -145,6 +145,11 @@ public:
 private:
     CadCore() = default;
 
+    static constexpr std::size_t kMaxDocuments = 32U;
+    static constexpr std::size_t kMaxObjectsPerDocument = 10000U;
+    static constexpr std::size_t kMaxNameBytes = 1024U;
+    static constexpr std::size_t kMaxPrismCoordinateValues = 30000U;
+
     std::uint64_t addPrimitiveLocked(
         CadDocument& document,
         const std::string& name,
@@ -159,6 +164,8 @@ private:
         std::uint64_t rightId);
 
     static void validateParameters(const CadObject& object);
+    static void validateName(const std::string& name);
+    static void ensureObjectCapacity(const CadDocument& document);
 
     static TopoDS_Shape buildObjectShape(
         const CadObject& object,
