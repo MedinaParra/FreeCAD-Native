@@ -105,6 +105,9 @@ jobs:
             -o /tmp/freecad-base-smoke
           /tmp/freecad-base-smoke
 
+      - name: Validate official FreeCAD 1.1.1 FCStd samples
+        run: python3 tests/fcstd_official_samples_contract.py .deps/freecad
+
       - uses: actions/download-artifact@v4
         with:
           name: occt-step-armeabi-v7a
@@ -461,8 +464,8 @@ jobs:
               '                    "-DFREECAD_BASE_SOURCE=${rootProject.projectDir.absolutePath}/.deps/freecad/src/Base",\n'
               '                    "-DFREECAD_BASE_GENERATED=${rootProject.projectDir.absolutePath}/.deps/freecad-generated",\n'
               '                    "-DBOOST_HEADER_ROOT=${rootProject.projectDir.absolutePath}/.deps/boost"')
-          text = text.replace('versionCode = 7', 'versionCode = 12')
-          text = text.replace('versionName = "0.6.0-step-io"', 'versionName = "0.10.0-freecad-base-hardened"')
+          text = text.replace('versionCode = 7', 'versionCode = 13')
+          text = text.replace('versionName = "0.6.0-step-io"', 'versionName = "0.11.0-fcstd-object-editor"')
           gradle.write_text(text)
 
           bridge = Path('app/src/main/java/com/medinaparra/freecadandroid/nativebridge/FreeCadBaseBridge.kt')
@@ -587,7 +590,7 @@ jobs:
       - name: Compile APK
         run: |
           set -o pipefail
-          gradle :app:assembleDebug --stacktrace 2>&1 | tee freecad-base-build.log
+          gradle :app:testDebugUnitTest :app:assembleDebug --stacktrace 2>&1 | tee freecad-base-build.log
 
       - name: Verify upstream FreeCADBase runtime
         run: |
@@ -605,16 +608,16 @@ jobs:
             'llvm-nm -C "$1" 2>/dev/null | grep -q "CadCore::addPrism"' _ {} \;
           find app/build -name libfreecad_android_core.so -print -exec sh -c \
             'llvm-nm -C "$1" 2>/dev/null | grep -q "CadCore::removeObject"' _ {} \;
-          cp "${APK}" FreeCAD-Android-Base-Runtime-v0.10.0.apk
-          sha256sum FreeCAD-Android-Base-Runtime-v0.10.0.apk \
-            > FreeCAD-Android-Base-Runtime-v0.10.0.apk.sha256
+          cp "${APK}" FreeCAD-Android-Base-Runtime-v0.11.0.apk
+          sha256sum FreeCAD-Android-Base-Runtime-v0.11.0.apk \
+            > FreeCAD-Android-Base-Runtime-v0.11.0.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: freecad-android-base-runtime-v0100-apk
+          name: freecad-android-base-runtime-v0110-apk
           path: |
-            FreeCAD-Android-Base-Runtime-v0.10.0.apk
-            FreeCAD-Android-Base-Runtime-v0.10.0.apk.sha256
+            FreeCAD-Android-Base-Runtime-v0.11.0.apk
+            FreeCAD-Android-Base-Runtime-v0.11.0.apk.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -622,7 +625,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: freecad-base-runtime-v0100-diagnostics
+          name: freecad-base-runtime-v0110-diagnostics
           path: |
             freecad-base-build.log
             apk-contents.txt
