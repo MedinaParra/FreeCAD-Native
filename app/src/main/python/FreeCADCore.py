@@ -44,7 +44,12 @@ def _install_vectors(app):
  V.__sub__=lambda s,o: V(s.x-vec(o).x,s.y-vec(o).y,s.z-vec(o).z)
  V.__neg__=lambda s: V(-s.x,-s.y,-s.z)
  V.__mul__=lambda s,n: V(s.x*float(n),s.y*float(n),s.z*float(n))
- V.__rmul__=V.__mul__; V.__truediv__=lambda s,n:s*(1.0/float(n))
+ V.__rmul__=V.__mul__
+ def divide(s,n):
+  divisor=float(n)
+  if not math.isfinite(divisor) or abs(divisor)<=1e-15: raise ZeroDivisionError("Vector division requires a finite non-zero divisor")
+  return s*(1.0/divisor)
+ V.__truediv__=divide
  V.dot=lambda s,o:s.x*vec(o).x+s.y*vec(o).y+s.z*vec(o).z
  V.cross=lambda s,o:V(s.y*vec(o).z-s.z*vec(o).y,s.z*vec(o).x-s.x*vec(o).z,s.x*vec(o).y-s.y*vec(o).x)
  def normalize(s):
@@ -53,14 +58,21 @@ def _install_vectors(app):
   return length
  V.normalize=normalize
  V.normalized=lambda s:(lambda r:(r.normalize(),r)[1])(s.copy())
- V.getAngle=lambda s,o:math.acos(max(-1.0,min(1.0,s.dot(o)/(s.Length*vec(o).Length))))
+ def get_angle(s,o):
+  other=vec(o); denominator=s.Length*other.Length
+  if denominator<=1e-15: raise ValueError("Cannot compute an angle with a null vector")
+  return math.acos(max(-1.0,min(1.0,s.dot(other)/denominator)))
+ V.getAngle=get_angle
  V.add=lambda s,o:s+o; V.sub=lambda s,o:s-o; V.multiply=lambda s,n:s*n
 
 def _coerce(app,t,v):
  if t=="App::PropertyString": return str(v)
  if t=="App::PropertyBool": return bool(v)
  if t=="App::PropertyInteger": return int(v)
- if t in {"App::PropertyFloat","App::PropertyLength","App::PropertyDistance","App::PropertyAngle","App::PropertyPercent"}: return float(v)
+ if t in {"App::PropertyFloat","App::PropertyLength","App::PropertyDistance","App::PropertyAngle","App::PropertyPercent"}:
+  value=float(v)
+  if not math.isfinite(value): raise ValueError(f"{t} requires a finite value")
+  return value
  if t=="App::PropertyVector": return v.copy() if isinstance(v,app.Vector) else app.Vector(*v)
  if t=="App::PropertyPlacement":
   if not isinstance(v,app.Placement): raise TypeError("Expected FreeCAD.Placement")
@@ -127,7 +139,13 @@ def install(app):
  def set_attr(self,name,value):
   if name in self.__dict__.get("_fc_defs",{}):
    if self._fc_modes.get(name)==1: raise AttributeError(f"{name} is read-only")
-   self._fc_values[name]=_coerce(app,self._fc_defs[name]["type"],value); self.touch(); return
+   coerced=_coerce(app,self._fc_defs[name]["type"],value)
+   prop_type=self._fc_defs[name]["type"]
+   links=coerced if prop_type=="App::PropertyLinkList" else [coerced]
+   if prop_type in {"App::PropertyLink","App::PropertyLinkSub","App::PropertyLinkList"}:
+    if any(link is not None and link._document is not self._document for link in links):
+     raise ValueError("Document links cannot cross document boundaries")
+   self._fc_values[name]=coerced; self.touch(); return
   os(self,name,value)
   if name=="Label" and "_fc_touched" in self.__dict__: self.touch()
  O.__init__,O.__getattr__,O.__setattr__=init_obj,get_attr,set_attr
