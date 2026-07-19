@@ -133,24 +133,318 @@ jobs:
           run-id: ${{ env.CPYTHON_SOURCE_RUN }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Enable upstream FreeCADBase runtime
+      - name: Enable upstream FreeCADBase and house macro support
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
+          def replace_once(text, old, new, label):
+              if new in text:
+                  return text
+              if old not in text:
+                  raise RuntimeError(f"Patch marker not found: {label}")
+              return text.replace(old, new, 1)
+
           cmake = Path('app/src/main/cpp/CMakeLists.txt')
           text = cmake.read_text()
-          text = text.replace(
+          text = replace_once(
+              text,
               'CadCore.cpp CadCoreScripting.cpp OcctMesher.cpp StepIo.cpp',
-              'BaseRuntimeProbe.cpp CadCore.cpp CadCoreScripting.cpp OcctMesher.cpp StepIo.cpp\n'
+              'BaseRuntimeProbe.cpp CadCore.cpp CadCorePrism.cpp CadCoreScripting.cpp OcctMesher.cpp StepIo.cpp\n'
               '    "${FREECAD_BASE_SOURCE}/Vector3D.cpp"\n'
-              '    "${FREECAD_BASE_SOURCE}/Matrix.cpp"')
+              '    "${FREECAD_BASE_SOURCE}/Matrix.cpp"',
+              'CMake source list')
           text = text.replace('cxx_std_17', 'cxx_std_20')
-          text = text.replace(
+          text = replace_once(
+              text,
               '"${CMAKE_CURRENT_SOURCE_DIR}" "${OCCT_INCLUDE_DIR}" "${PYTHON_INCLUDE_DIR}")',
               '"${CMAKE_CURRENT_SOURCE_DIR}" "${OCCT_INCLUDE_DIR}" "${PYTHON_INCLUDE_DIR}"\n'
-              '    "${FREECAD_BASE_SOURCE}" "${FREECAD_BASE_GENERATED}" "${BOOST_HEADER_ROOT}")')
+              '    "${FREECAD_BASE_SOURCE}" "${FREECAD_BASE_GENERATED}" "${BOOST_HEADER_ROOT}")',
+              'CMake includes')
           cmake.write_text(text)
+
+          header = Path('app/src/main/cpp/CadCore.hpp')
+          text = header.read_text()
+          text = replace_once(text, '    Torus,\n    Fuse,', '    Torus,\n    Prism,\n    Fuse,', 'Prism enum')
+          text = replace_once(
+              text,
+              '    std::array<double, 4> parameters {0.0, 0.0, 0.0, 0.0};\n',
+              '    std::array<double, 4> parameters {0.0, 0.0, 0.0, 0.0};\n'
+              '    std::vector<double> profileData;\n',
+              'Prism data')
+          text = replace_once(
+              text,
+              '    std::uint64_t addFuse(\n',
+              '    std::uint64_t addPrism(\n'
+              '        std::uint64_t documentId,\n'
+              '        const std::string& name,\n'
+              '        const std::vector<double>& profileCoordinates,\n'
+              '        double dx,\n'
+              '        double dy,\n'
+              '        double dz);\n\n'
+              '    std::uint64_t addFuse(\n',
+              'addPrism declaration')
+          header.write_text(text)
+
+          core = Path('app/src/main/cpp/CadCore.cpp')
+          text = core.read_text()
+          text = replace_once(
+              text,
+              '#include <BRepBuilderAPI_Transform.hxx>\n',
+              '#include <BRepBuilderAPI_Transform.hxx>\n'
+              '#include <BRepBuilderAPI_MakeFace.hxx>\n'
+              '#include <BRepBuilderAPI_MakePolygon.hxx>\n'
+              '#include <BRepPrimAPI_MakePrism.hxx>\n',
+              'Prism includes')
+          text = replace_once(
+              text,
+              '        case ObjectKind::Torus: return "Part::Torus";\n',
+              '        case ObjectKind::Torus: return "Part::Torus";\n'
+              '        case ObjectKind::Prism: return "Part::Prism";\n',
+              'Prism name')
+          torus_block = '''        case ObjectKind::Torus:
+              result = BRepPrimAPI_MakeTorus(
+                  object.parameters[0], object.parameters[1]).Shape();
+              break;
+          case ObjectKind::Fuse:'''
+          prism_block = '''        case ObjectKind::Torus:
+              result = BRepPrimAPI_MakeTorus(
+                  object.parameters[0], object.parameters[1]).Shape();
+              break;
+          case ObjectKind::Prism: {
+              std::size_t pointCount = object.profileData.size() / 3U;
+              if (pointCount < 3U) {
+                  throw std::runtime_error("Prism profile has fewer than three points");
+              }
+              if (pointCount > 3U) {
+                  const std::size_t last = (pointCount - 1U) * 3U;
+                  if (std::abs(object.profileData[0] - object.profileData[last]) <= 1.0e-12 &&
+                      std::abs(object.profileData[1] - object.profileData[last + 1U]) <= 1.0e-12 &&
+                      std::abs(object.profileData[2] - object.profileData[last + 2U]) <= 1.0e-12) {
+                      --pointCount;
+                  }
+              }
+              BRepBuilderAPI_MakePolygon polygon;
+              for (std::size_t index = 0; index < pointCount; ++index) {
+                  const std::size_t base = index * 3U;
+                  polygon.Add(gp_Pnt(object.profileData[base],
+                                     object.profileData[base + 1U],
+                                     object.profileData[base + 2U]));
+              }
+              polygon.Close();
+              if (!polygon.IsDone()) {
+                  throw std::runtime_error("Unable to build prism polygon");
+              }
+              BRepBuilderAPI_MakeFace face(polygon.Wire());
+              if (!face.IsDone()) {
+                  throw std::runtime_error("Unable to build prism face");
+              }
+              BRepPrimAPI_MakePrism prism(
+                  face.Face(),
+                  gp_Vec(object.parameters[0], object.parameters[1], object.parameters[2]),
+                  Standard_True);
+              prism.Build();
+              if (!prism.IsDone()) {
+                  throw std::runtime_error("Unable to extrude prism face");
+              }
+              result = prism.Shape();
+              break;
+          }
+          case ObjectKind::Fuse:'''
+          text = replace_once(text, torus_block, prism_block, 'Prism evaluator')
+          core.write_text(text)
+
+          scripting = Path('app/src/main/cpp/CadCoreScripting.cpp')
+          text = scripting.read_text()
+          text = replace_once(
+              text,
+              '        case ObjectKind::Fuse:\n        case ObjectKind::Cut:\n        case ObjectKind::Common:\n            break;\n',
+              '        case ObjectKind::Prism:\n            break;\n'
+              '        case ObjectKind::Fuse:\n        case ObjectKind::Cut:\n        case ObjectKind::Common:\n            break;\n',
+              'Prism validation')
+          scripting.write_text(text)
+
+          module = Path('app/src/main/cpp/PyFreeCadModule.cpp')
+          text = module.read_text()
+          if '#include <vector>' not in text:
+              text = text.replace('#include <string>\n', '#include <string>\n#include <vector>\n')
+          prism_function = r'''
+          PyObject* pyAddPrism(PyObject*, PyObject* args) {
+              unsigned long long documentId = 0;
+              const char* name = nullptr;
+              PyObject* coordinateObject = nullptr;
+              double dx = 0.0;
+              double dy = 0.0;
+              double dz = 0.0;
+              if (!PyArg_ParseTuple(args, "KsOddd:add_prism", &documentId, &name,
+                                    &coordinateObject, &dx, &dy, &dz)) {
+                  return nullptr;
+              }
+              PyObject* sequence = PySequence_Fast(
+                  coordinateObject, "Prism coordinates must be a sequence");
+              if (sequence == nullptr) {
+                  return nullptr;
+              }
+              std::vector<double> coordinates;
+              const Py_ssize_t size = PySequence_Fast_GET_SIZE(sequence);
+              coordinates.reserve(static_cast<std::size_t>(size));
+              for (Py_ssize_t index = 0; index < size; ++index) {
+                  const double value = PyFloat_AsDouble(PySequence_Fast_GET_ITEM(sequence, index));
+                  if (PyErr_Occurred()) {
+                      Py_DECREF(sequence);
+                      return nullptr;
+                  }
+                  coordinates.push_back(value);
+              }
+              try {
+                  const std::uint64_t result = fcandroid::CadCore::instance().addPrism(
+                      asId(documentId), name, coordinates, dx, dy, dz);
+                  Py_DECREF(sequence);
+                  return PyLong_FromUnsignedLongLong(result);
+              } catch (...) {
+                  Py_DECREF(sequence);
+                  setPythonErrorFromCurrentException();
+                  return nullptr;
+              }
+          }
+
+          '''.replace('          ', '')
+          text = replace_once(text, 'PyObject* addBoolean(PyObject* args,', prism_function + 'PyObject* addBoolean(PyObject* args,', 'Python prism function')
+          text = replace_once(
+              text,
+              '    {"add_torus", pyAddTorus, METH_VARARGS, "Add a parametric torus."},\n',
+              '    {"add_torus", pyAddTorus, METH_VARARGS, "Add a parametric torus."},\n'
+              '    {"add_prism", pyAddPrism, METH_VARARGS, "Add an extruded polygon prism."},\n',
+              'Python prism method')
+          module.write_text(text)
+
+          freecad = Path('app/src/main/python/FreeCAD.py')
+          source = freecad.read_text()
+          source = source.replace(
+              '__slots__ = ("_owner", "ShapeColor", "LineColor", "DisplayMode")',
+              '__slots__ = ("_owner", "ShapeColor", "LineColor", "Transparency", "DisplayMode")')
+          source = source.replace(
+              '        self.LineColor = (0.1, 0.1, 0.1)\n        self.DisplayMode = "Flat Lines"',
+              '        self.LineColor = (0.1, 0.1, 0.1)\n        self.Transparency = 0\n        self.DisplayMode = "Flat Lines"')
+          source = source.replace(
+              'return ("0", "5", "0", "Android", _native.kernel_info())',
+              'return ("0", "9", "1", "Android", _native.kernel_info())')
+          if 'FreeCADCore.install' not in source:
+              source += '\n\nimport FreeCADCore as _FreeCADCore\n_FreeCADCore.install(sys.modules[__name__])\n'
+          freecad.write_text(source)
+
+          part = Path('app/src/main/python/Part.py')
+          source = part.read_text()
+          if '_android_house_macro_support' not in source:
+              source += r'''
+
+          # Extended compatibility for generated architectural macros.
+          _android_house_macro_support = True
+
+          class Wire:
+              def __init__(self, points):
+                  self.Points = [p.copy() if isinstance(p, App.Vector) else App.Vector(*p) for p in points]
+                  if len(self.Points) < 3:
+                      raise ValueError("Part.makePolygon requires at least three points")
+
+          class Face:
+              def __init__(self, wire):
+                  if not isinstance(wire, Wire):
+                      raise TypeError("Part.Face expects a Part.Wire")
+                  self.Wire = wire
+
+              def extrude(self, vector):
+                  vector = vector if isinstance(vector, App.Vector) else App.Vector(*vector)
+                  if vector.Length <= 1.0e-12:
+                      raise ValueError("Extrusion vector must not be null")
+                  points = list(self.Wire.Points)
+                  if len(points) > 3:
+                      first, last = points[0], points[-1]
+                      if (abs(first.x-last.x) <= 1.0e-12 and
+                              abs(first.y-last.y) <= 1.0e-12 and
+                              abs(first.z-last.z) <= 1.0e-12):
+                          points.pop()
+                  flat = tuple(value for point in points for value in (point.x, point.y, point.z))
+                  return Shape("Part::Prism", (flat, vector.x, vector.y, vector.z), App.Placement())
+
+          def makePolygon(points):
+              return Wire(points)
+
+          _original_makeCylinder = makeCylinder
+
+          def _rotation_from_z(direction):
+              direction = direction if isinstance(direction, App.Vector) else App.Vector(*direction)
+              length = direction.Length
+              if length <= 1.0e-12:
+                  raise ValueError("Direction vector must not be null")
+              nx, ny, nz = direction.x/length, direction.y/length, direction.z/length
+              nz = max(-1.0, min(1.0, nz))
+              if nz >= 1.0 - 1.0e-12:
+                  return App.Rotation()
+              if nz <= -1.0 + 1.0e-12:
+                  return App.Rotation(App.Vector(1, 0, 0), 180)
+              return App.Rotation(App.Vector(-ny, nx, 0), math.degrees(math.acos(nz)))
+
+          def makeCylinder(radius, height, pnt=None, dir=None, angle=360.0):
+              shape = _original_makeCylinder(radius, height, None, None, angle)
+              base = pnt if isinstance(pnt, App.Vector) else App.Vector(*(pnt or (0, 0, 0)))
+              shape.Placement = App.Placement(base, App.Rotation() if dir is None else _rotation_from_z(dir))
+              return shape
+
+          def _apply_spec_placement(document_id, native_id, spec):
+              placement = getattr(spec, "_placement", None)
+              if not isinstance(placement, App.Placement):
+                  return
+              base = placement.Base
+              qx, qy, qz, qw = placement.Rotation.Q
+              App._native.set_placement(document_id, native_id, base.x, base.y, base.z, qx, qy, qz, qw)
+
+          def _materialize_spec(document, spec, name, sequence):
+              if not isinstance(spec, Shape):
+                  raise TypeError("Part::Feature.Shape expects a Part.Shape")
+              sequence[0] += 1
+              unique = f"{name}_{sequence[0]}"
+              kind = spec._kind
+              params = tuple(spec._params)
+              primitives = {
+                  "Part::Box": App._native.add_box,
+                  "Part::Cylinder": App._native.add_cylinder,
+                  "Part::Sphere": App._native.add_sphere,
+                  "Part::Cone": App._native.add_cone,
+                  "Part::Torus": App._native.add_torus,
+              }
+              booleans = {
+                  "Part::Fuse": App._native.add_fuse,
+                  "Part::Cut": App._native.add_cut,
+                  "Part::Common": App._native.add_common,
+              }
+              if kind in primitives:
+                  native_id = primitives[kind](document._id, unique, *params)
+              elif kind == "Part::Prism":
+                  coordinates, dx, dy, dz = params
+                  native_id = App._native.add_prism(document._id, unique, coordinates, dx, dy, dz)
+              elif kind in booleans:
+                  left = _materialize_spec(document, spec._left, unique + "_Base", sequence)
+                  right = _materialize_spec(document, spec._right, unique + "_Tool", sequence)
+                  native_id = booleans[kind](document._id, unique, left, right)
+              else:
+                  raise NotImplementedError(f"Unsupported Part shape specification: {kind!r}")
+              _apply_spec_placement(document._id, native_id, spec)
+              return int(native_id)
+
+          def _compat_materialize_shape_spec(self):
+              if self._id or self._shape_spec is None:
+                  return
+              native_id = _materialize_spec(self._document, self._shape_spec, self.Name, [0])
+              object.__setattr__(self, "_id", native_id)
+              App._native.set_visibility(self._document._id, native_id, self._visibility)
+
+          App.DocumentObject._materialize_shape_spec = _compat_materialize_shape_spec
+          for _name in ("Wire", "Face", "makePolygon"):
+              if _name not in __all__:
+                  __all__.append(_name)
+          '''.replace('          ', '')
+          part.write_text(source)
 
           gradle = Path('app/build.gradle.kts')
           text = gradle.read_text().replace('-std=c++17', '-std=c++20')
@@ -160,9 +454,8 @@ jobs:
               '                    "-DFREECAD_BASE_SOURCE=${rootProject.projectDir.absolutePath}/.deps/freecad/src/Base",\n'
               '                    "-DFREECAD_BASE_GENERATED=${rootProject.projectDir.absolutePath}/.deps/freecad-generated",\n'
               '                    "-DBOOST_HEADER_ROOT=${rootProject.projectDir.absolutePath}/.deps/boost"')
-          text = text.replace('versionCode = 7', 'versionCode = 10')
-          text = text.replace('versionName = "0.6.0-step-io"',
-                              'versionName = "0.9.0-freecad-base"')
+          text = text.replace('versionCode = 7', 'versionCode = 11')
+          text = text.replace('versionName = "0.6.0-step-io"', 'versionName = "0.9.1-freecad-base-macro-fix"')
           gradle.write_text(text)
 
           bridge = Path('app/src/main/java/com/medinaparra/freecadandroid/nativebridge/FreeCadBaseBridge.kt')
@@ -173,16 +466,15 @@ jobs:
               external fun nativeSelfTest(): String
               fun selfTest(): String = try { nativeSelfTest() }
                   catch (error: Throwable) {
-                      "FREECAD BASE NO DISPONIBLE\\n${error.message ?: error::class.java.simpleName}"
+                      "FREECAD BASE NO DISPONIBLE\n${error.message ?: error::class.java.simpleName}"
                   }
           }
           '''.replace('          ', ''))
 
           screen = Path('app/src/main/java/com/medinaparra/freecadandroid/ui/MainScreenFiles.kt')
           text = screen.read_text()
-          text = text.replace(
-              'TextStyle(FontFamily.Monospace, fontSize = 12.sp)',
-              'TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp)')
+          text = text.replace('TextStyle(FontFamily.Monospace, fontSize = 12.sp)',
+                              'TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp)')
           text = text.replace(
               'import com.medinaparra.freecadandroid.nativebridge.NativeCadBridge',
               'import com.medinaparra.freecadandroid.nativebridge.FreeCadBaseBridge\n'
@@ -191,9 +483,8 @@ jobs:
               'var state by remember { mutableStateOf(FilesState()) }',
               'var state by remember { mutableStateOf(FilesState()) }\n'
               '    val freeCadBaseStatus = remember { FreeCadBaseBridge.selfTest() }')
-          text = text.replace(
-              'CPYTHON + OCCT + STEP + FCMACRO + FCSTD',
-              'FREECADBASE + CPYTHON + OCCT + STEP + FCMACRO + FCSTD')
+          text = text.replace('CPYTHON + OCCT + STEP + FCMACRO + FCSTD',
+                              'FREECADBASE + HOUSE MACRO + CPYTHON + OCCT + STEP + FCSTD')
           text = text.replace(
               'state.error ?: scene?.summary ?: state.phase,',
               'state.error ?: ((scene?.summary ?: state.phase) + "\\n\\n" + freeCadBaseStatus),')
@@ -202,13 +493,67 @@ jobs:
 
           assets = Path('app/src/main/assets/licenses')
           assets.mkdir(parents=True, exist_ok=True)
-          Path(assets / 'FreeCAD-LGPL-2.1.txt').write_text(
-              Path('.deps/freecad/LICENSE').read_text())
+          Path(assets / 'FreeCAD-LGPL-2.1.txt').write_text(Path('.deps/freecad/LICENSE').read_text())
           PY
-          grep -q 'BaseRuntimeProbe.cpp' app/src/main/cpp/CMakeLists.txt
-          grep -q 'cxx_std_20' app/src/main/cpp/CMakeLists.txt
-          grep -q 'FREECADBASE + CPYTHON' \
-            app/src/main/java/com/medinaparra/freecadandroid/ui/MainScreenFiles.kt
+          grep -q 'CadCorePrism.cpp' app/src/main/cpp/CMakeLists.txt
+          grep -q 'ObjectKind::Prism' app/src/main/cpp/CadCore.cpp
+          grep -q 'add_prism' app/src/main/cpp/PyFreeCadModule.cpp
+          grep -q 'makePolygon' app/src/main/python/Part.py
+          grep -q 'FreeCADCore.install' app/src/main/python/FreeCAD.py
+          python3 -m py_compile app/src/main/python/*.py
+
+      - name: Test house macro API compatibility
+        run: |
+          python3 - <<'PY'
+          import sys, types
+          native = types.ModuleType('_freecad_native')
+          counter = {'value': 0}
+          def new_id(*args):
+              counter['value'] += 1
+              return counter['value']
+          native.create_document = new_id
+          native.close_document = lambda *a: None
+          native.reset = lambda: None
+          native.set_active_document = lambda *a: None
+          native.add_box = new_id
+          native.add_cylinder = new_id
+          native.add_sphere = new_id
+          native.add_cone = new_id
+          native.add_torus = new_id
+          native.add_prism = new_id
+          native.add_fuse = new_id
+          native.add_cut = new_id
+          native.add_common = new_id
+          native.set_parameter = lambda *a: None
+          native.set_boolean_operands = lambda *a: None
+          native.set_placement = lambda *a: None
+          native.set_visibility = lambda *a: None
+          native.recompute = lambda *a: True
+          native.kernel_info = lambda: 'host-stub'
+          sys.modules['_freecad_native'] = native
+          sys.path.insert(0, 'app/src/main/python')
+          import FreeCAD as App
+          import Part
+          doc = App.newDocument('CasaParametrica')
+          group = doc.addObject('App::DocumentObjectGroup', 'Muros')
+          wall = Part.makeBox(10000, 200, 2800, App.Vector(0, 0, 200))
+          opening = Part.makeBox(1000, 220, 2200, App.Vector(4500, -10, 200))
+          feature = doc.addObject('Part::Feature', 'MuroFrontal')
+          feature.Shape = wall.cut(opening).removeSplitter()
+          feature.ViewObject.Transparency = 15
+          group.addObject(feature)
+          points = [App.Vector(0, 0, 3000), App.Vector(10000, 0, 3000),
+                    App.Vector(5000, 0, 4800), App.Vector(0, 0, 3000)]
+          gable = doc.addObject('Part::Feature', 'Fronton')
+          gable.Shape = Part.Face(Part.makePolygon(points)).extrude(App.Vector(0, 200, 0))
+          ridge = doc.addObject('Part::Feature', 'Cumbrera')
+          ridge.Shape = Part.makeCylinder(90, 8800, App.Vector(5000, -400, 4840), App.Vector(0, 1, 0))
+          assert doc.recompute()
+          assert len(group.Group) == 1
+          assert feature.ViewObject.Transparency == 15
+          assert gable._id and ridge._id
+          print('House macro compatibility test passed')
+          PY
 
       - name: Package validated OCCT and CPython runtimes
         run: |
@@ -247,16 +592,18 @@ jobs:
           grep -q 'assets/licenses/FreeCAD-LGPL-2.1.txt' apk-contents.txt
           find app/build -name libfreecad_android_core.so -print -exec sh -c \
             'llvm-nm -C "$1" 2>/dev/null | grep -q "Base::Matrix4D::determinant"' _ {} \;
-          cp "${APK}" FreeCAD-Android-Base-Runtime-v0.9.0.apk
-          sha256sum FreeCAD-Android-Base-Runtime-v0.9.0.apk \
-            > FreeCAD-Android-Base-Runtime-v0.9.0.apk.sha256
+          find app/build -name libfreecad_android_core.so -print -exec sh -c \
+            'llvm-nm -C "$1" 2>/dev/null | grep -q "CadCore::addPrism"' _ {} \;
+          cp "${APK}" FreeCAD-Android-Base-Runtime-v0.9.1.apk
+          sha256sum FreeCAD-Android-Base-Runtime-v0.9.1.apk \
+            > FreeCAD-Android-Base-Runtime-v0.9.1.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: freecad-android-base-runtime-apk
+          name: freecad-android-base-runtime-v091-apk
           path: |
-            FreeCAD-Android-Base-Runtime-v0.9.0.apk
-            FreeCAD-Android-Base-Runtime-v0.9.0.apk.sha256
+            FreeCAD-Android-Base-Runtime-v0.9.1.apk
+            FreeCAD-Android-Base-Runtime-v0.9.1.apk.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -264,7 +611,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: freecad-base-runtime-diagnostics
+          name: freecad-base-runtime-v091-diagnostics
           path: |
             freecad-base-build.log
             apk-contents.txt
