@@ -460,7 +460,7 @@ jobs:
           gradle.write_text(text)
 
           bridge = Path('app/src/main/java/com/medinaparra/freecadandroid/nativebridge/FreeCadBaseBridge.kt')
-          bridge.write_text('''package com.medinaparra.freecadandroid.nativebridge
+          bridge.write_text(r'''package com.medinaparra.freecadandroid.nativebridge
 
           object FreeCadBaseBridge {
               init { System.loadLibrary("freecad_android_core") }
