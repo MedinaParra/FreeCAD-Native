@@ -232,6 +232,7 @@ class DocumentObject:
         "_base_object",
         "_tool_object",
         "_shape_spec",
+        "_removed",
         "Name",
         "Label",
         "ViewObject",
@@ -251,7 +252,13 @@ class DocumentObject:
         object.__setattr__(self, "_base_object", None)
         object.__setattr__(self, "_tool_object", None)
         object.__setattr__(self, "_shape_spec", None)
+        object.__setattr__(self, "_removed", False)
         object.__setattr__(self, "ViewObject", _ViewObject(self))
+
+    def _assert_live(self):
+        if self._removed:
+            raise RuntimeError(f"Object {self.Name!r} has been removed")
+        self._document._assert_open()
 
     @property
     def TypeId(self):
@@ -263,6 +270,7 @@ class DocumentObject:
 
     @Placement.setter
     def Placement(self, value):
+        self._assert_live()
         if not isinstance(value, Placement):
             raise TypeError("Placement must be a FreeCAD.Placement")
         object.__setattr__(self, "_placement", value.copy()._bind(self._sync_placement))
@@ -274,6 +282,7 @@ class DocumentObject:
 
     @Visibility.setter
     def Visibility(self, value):
+        self._assert_live()
         object.__setattr__(self, "_visibility", bool(value))
         if self._id:
             _native.set_visibility(self._document._id, self._id, self._visibility)
@@ -284,6 +293,7 @@ class DocumentObject:
 
     @Base.setter
     def Base(self, value):
+        self._assert_live()
         if value is not None and not isinstance(value, DocumentObject):
             raise TypeError("Boolean Base must be a document object")
         if value is self:
@@ -301,6 +311,7 @@ class DocumentObject:
 
     @Tool.setter
     def Tool(self, value):
+        self._assert_live()
         if value is not None and not isinstance(value, DocumentObject):
             raise TypeError("Boolean Tool must be a document object")
         if value is self:
@@ -320,6 +331,7 @@ class DocumentObject:
 
     @Shape.setter
     def Shape(self, value):
+        self._assert_live()
         if self._type_id != "Part::Feature":
             raise AttributeError("Shape assignment is currently supported only on Part::Feature")
         object.__setattr__(self, "_shape_spec", value)
@@ -333,8 +345,13 @@ class DocumentObject:
 
     def __setattr__(self, name, value):
         if name in self._internal_names or name.startswith("_"):
+            if name == "Name" and "Name" in self.__dict__:
+                raise AttributeError("Document object Name is immutable")
+            if name == "Label" and "_document" in self.__dict__:
+                self._assert_live()
             object.__setattr__(self, name, value)
             return
+        self._assert_live()
         index_map = _PARAMETER_INDEX.get(self._type_id, {})
         if name in index_map:
             numeric = _finite_float(value, name)
@@ -371,6 +388,7 @@ class DocumentObject:
         return False
 
     def _sync_placement(self):
+        self._assert_live()
         if not self._id:
             return
         base = self._placement.Base
@@ -388,6 +406,7 @@ class DocumentObject:
         )
 
     def _sync_boolean(self):
+        self._assert_live()
         if self._type_id not in _BOOLEAN_FUNCTIONS:
             return
         if self._base_object is None or self._tool_object is None:
@@ -440,6 +459,7 @@ class DocumentObject:
         _native.set_visibility(self._document._id, self._id, self._visibility)
 
     def _ensure_materialized(self):
+        self._assert_live()
         if self._id:
             return
         if self._type_id in _BOOLEAN_FUNCTIONS:
@@ -460,12 +480,19 @@ class Document:
         self._id = int(_native.create_document(self.Name))
         self._objects = []
         self._by_name = {}
+        self._closed = False
+
+    def _assert_open(self):
+        if self._closed:
+            raise RuntimeError(f"Document {self.Name!r} is closed")
 
     @property
     def Objects(self):
+        self._assert_open()
         return list(self._objects)
 
     def addObject(self, type_name: str, name: str):
+        self._assert_open()
         type_name = str(type_name)
         name = self._unique_name(str(name))
         native_id = 0
@@ -481,9 +508,40 @@ class Document:
         return obj
 
     def getObject(self, name: str):
+        self._assert_open()
         return self._by_name.get(str(name))
 
+    def removeObject(self, name_or_object):
+        self._assert_open()
+        obj = (
+            name_or_object
+            if isinstance(name_or_object, DocumentObject)
+            else self._by_name.get(str(name_or_object))
+        )
+        if obj is None:
+            return None
+        if obj._document is not self or obj._removed:
+            raise ValueError("Object does not belong to this document")
+        dependents = [
+            candidate.Name
+            for candidate in self._objects
+            if candidate is not obj
+            and (candidate._base_object is obj or candidate._tool_object is obj)
+        ]
+        if dependents:
+            raise RuntimeError(
+                f"Cannot remove {obj.Name!r}; referenced by {', '.join(dependents)}"
+            )
+        if obj._id:
+            _native.remove_object(self._id, obj._id)
+        self._objects.remove(obj)
+        self._by_name.pop(obj.Name, None)
+        object.__setattr__(obj, "_id", 0)
+        object.__setattr__(obj, "_removed", True)
+        return None
+
     def recompute(self):
+        self._assert_open()
         names = [obj.Name for obj in self._objects]
         if len(names) != len(set(names)) or set(names) != set(self._by_name):
             raise RuntimeError("Document object index is inconsistent")
@@ -553,7 +611,11 @@ def closeDocument(name_or_document):
         document = _documents.get(str(name_or_document))
     if document is None:
         return
+    if document._closed:
+        return
     _native.close_document(document._id)
+    document._closed = True
+    document._id = 0
     _documents.pop(document.Name, None)
     if ActiveDocument is document:
         ActiveDocument = next(iter(_documents.values()), None)
@@ -581,6 +643,9 @@ def Version():
 
 def _reset():
     global ActiveDocument
+    for document in _documents.values():
+        document._closed = True
+        document._id = 0
     _documents.clear()
     ActiveDocument = None
     _native.reset()

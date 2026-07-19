@@ -173,7 +173,7 @@ def install(app):
  if getattr(app,"_android_core_model_installed",False): return app
  app._android_core_model_installed=True; _install_vectors(app)
  O,D=app.DocumentObject,app.Document
- oi,og,os,da=O.__init__,O.__getattr__,O.__setattr__,D.addObject
+ oi,og,os,da,dr=O.__init__,O.__getattr__,O.__setattr__,D.addObject,D.removeObject
  O._internal_names=set(O._internal_names)|{"_fc_defs","_fc_values","_fc_group","_fc_expr","_fc_modes","_fc_touched"}
  def init_obj(self,*a,**k):
   oi(self,*a,**k)
@@ -181,9 +181,11 @@ def install(app):
   object.__setattr__(self,"_fc_group",[]); object.__setattr__(self,"_fc_expr",{})
   object.__setattr__(self,"_fc_modes",{}); object.__setattr__(self,"_fc_touched",True)
  def get_attr(self,name):
+  self._assert_live()
   if name in self._fc_values:return self._fc_values[name]
   return og(self,name)
  def set_attr(self,name,value):
+  self._assert_live()
   if name in self.__dict__.get("_fc_defs",{}):
    if self._fc_modes.get(name)==1: raise AttributeError(f"{name} is read-only")
    coerced=_coerce(app,self._fc_defs[name]["type"],value)
@@ -197,6 +199,7 @@ def install(app):
   if name=="Label" and "_fc_touched" in self.__dict__: self.touch()
  O.__init__,O.__getattr__,O.__setattr__=init_obj,get_attr,set_attr
  def add_prop(self,t,name,group="",doc="",attr=0,readonly=False,hidden=False):
+  self._assert_live()
   t,name=str(t),str(name)
   if t not in _TYPES: raise NotImplementedError(f"Property type {t!r} is not supported")
   if not name.isidentifier(): raise ValueError("Invalid property name")
@@ -208,9 +211,11 @@ def install(app):
   self._fc_defs[name]={"type":t,"group":str(group),"doc":str(doc),"attr":int(attr),"hidden":bool(hidden)}
   self._fc_values[name]=default; self._fc_modes[name]=1 if readonly else 0; self.touch(); return self
  def touch(self):
+  self._assert_live()
   object.__setattr__(self,"_fc_touched",True)
   for obj in self.InList: object.__setattr__(obj,"_fc_touched",True)
  def set_expr(self,prop,text):
+  self._assert_live()
   prop=str(prop)
   if text is None:self._fc_expr.pop(prop,None)
   else:
@@ -219,6 +224,7 @@ def install(app):
    self._fc_expr[prop]=str(text)
   self.touch()
  def group_add(self,obj):
+  self._assert_live();obj._assert_live()
   if self.TypeId!="App::DocumentObjectGroup":raise TypeError("Not a group")
   if obj._document is not self._document:raise ValueError("Different document")
   if obj not in self._fc_group:self._fc_group.append(obj);self.touch()
@@ -244,6 +250,7 @@ def install(app):
   di(self,*a,**k);self._fc_tx=None;self._fc_undo=[];self._fc_redo=[];self._fc_tid=0
  D.__init__=init_doc
  def add_obj(self,t,name):
+  self._assert_open()
   t=str(t)
   if t in _NON_GEOM:
    name=self._unique_name(str(name));obj=app.DocumentObject(self,t,name,0)
@@ -251,6 +258,14 @@ def install(app):
   if t=="PartDesign::Feature":t="Part::Feature"
   obj=da(self,t,name);obj.touch();return obj
  D.addObject=add_obj
+ def remove_obj(self,name_or_object):
+  self._assert_open()
+  target=name_or_object if isinstance(name_or_object,app.DocumentObject) else self._by_name.get(str(name_or_object))
+  if target is None:return None
+  dependents=[o.Name for o in self.Objects if o is not target and target in _links(o)]
+  if dependents:raise RuntimeError(f"Cannot remove {target.Name!r}; referenced by {', '.join(dependents)}")
+  return dr(self,target)
+ D.removeObject=remove_obj
  def snapshot(doc):
   return [{"name":o.Name,"label":o.Label,"primitive":copy.deepcopy(o._properties),
    "custom":copy.deepcopy(o._fc_values),"expr":dict(o._fc_expr),
@@ -266,6 +281,7 @@ def install(app):
    o._fc_expr=dict(x["expr"]);o.touch()
   doc.recompute()
  def recompute(doc,*a,**k):
+  doc._assert_open()
   ordered=_expression_order(doc)
   previous=[(o,p,copy.deepcopy(getattr(o,p))) for o,p,_,_ in ordered]
   try:

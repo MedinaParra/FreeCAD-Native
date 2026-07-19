@@ -1,5 +1,6 @@
 #include "CadCore.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -23,6 +24,32 @@ void CadCore::reset() {
     documents_.clear();
     nextDocumentId_ = 1;
     nextObjectId_ = 1;
+}
+
+void CadCore::removeObject(
+    const std::uint64_t documentId,
+    const std::uint64_t objectId) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    CadDocument& document = requireDocumentLocked(documentId);
+    const CadObject& target = requireObjectLocked(document, objectId);
+
+    for (const auto& [candidateId, candidate] : document.objects) {
+        if (candidateId == objectId || !isBooleanKind(candidate.kind)) {
+            continue;
+        }
+        if (candidate.leftId == objectId || candidate.rightId == objectId) {
+            throw std::invalid_argument(
+                "Cannot remove " + target.name + "; it is referenced by " + candidate.name);
+        }
+    }
+
+    document.objects.erase(objectId);
+    document.evaluationOrder.erase(
+        std::remove(
+            document.evaluationOrder.begin(),
+            document.evaluationOrder.end(),
+            objectId),
+        document.evaluationOrder.end());
 }
 
 void CadCore::setParameter(

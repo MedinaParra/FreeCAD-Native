@@ -78,6 +78,22 @@ PyObject* pyCloseDocument(PyObject*, PyObject* args) {
     }
 }
 
+PyObject* pyRemoveObject(PyObject*, PyObject* args) {
+    unsigned long long documentId = 0;
+    unsigned long long objectId = 0;
+    if (!PyArg_ParseTuple(args, "KK:remove_object", &documentId, &objectId)) {
+        return nullptr;
+    }
+    try {
+        fcandroid::CadCore::instance().removeObject(
+            asId(documentId), asId(objectId));
+        Py_RETURN_NONE;
+    } catch (...) {
+        setPythonErrorFromCurrentException();
+        return nullptr;
+    }
+}
+
 PyObject* pySetActiveDocument(PyObject*, PyObject* args) {
     unsigned long long documentId = 0;
     if (!PyArg_ParseTuple(args, "K:set_active_document", &documentId)) {
@@ -430,6 +446,7 @@ PyMethodDef moduleMethods[] = {
     {"reset", pyReset, METH_NOARGS, "Reset all native CAD documents."},
     {"create_document", pyCreateDocument, METH_VARARGS, "Create a native CAD document."},
     {"close_document", pyCloseDocument, METH_VARARGS, "Close a native CAD document."},
+    {"remove_object", pyRemoveObject, METH_VARARGS, "Remove an unreferenced CAD object."},
     {"set_active_document", pySetActiveDocument, METH_VARARGS, "Set the active document handle."},
     {"active_document", pyActiveDocument, METH_NOARGS, "Return the active document handle."},
     {"add_box", pyAddBox, METH_VARARGS, "Add a parametric box."},

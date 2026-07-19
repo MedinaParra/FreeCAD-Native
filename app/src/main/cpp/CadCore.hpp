@@ -60,6 +60,7 @@ public:
     void reset();
     std::uint64_t createDocument(const std::string& name);
     void closeDocument(std::uint64_t documentId);
+    void removeObject(std::uint64_t documentId, std::uint64_t objectId);
 
     std::uint64_t addBox(
         std::uint64_t documentId,
