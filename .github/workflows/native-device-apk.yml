@@ -1,0 +1,12 @@
+name: Native device APK (legacy v0.3)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [native-device-test]
+
+jobs:
+  legacy-build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "This legacy workflow is retained for the manually generated v0.3 core."

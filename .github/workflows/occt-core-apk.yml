@@ -1,0 +1,14 @@
+name: OCCT core device APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archived:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Archived phase
+        run: echo "OCCT v0.4 is already validated. Use the Python macro workflow for this branch."
