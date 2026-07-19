@@ -203,54 +203,54 @@ jobs:
               '        case ObjectKind::Prism: return "Part::Prism";\n',
               'Prism name')
           torus_block = '''        case ObjectKind::Torus:
-            result = BRepPrimAPI_MakeTorus(
-                object.parameters[0], object.parameters[1]).Shape();
-            break;
-        case ObjectKind::Fuse:'''
+                      result = BRepPrimAPI_MakeTorus(
+                          object.parameters[0], object.parameters[1]).Shape();
+                      break;
+                  case ObjectKind::Fuse:'''
           prism_block = '''        case ObjectKind::Torus:
-            result = BRepPrimAPI_MakeTorus(
-                object.parameters[0], object.parameters[1]).Shape();
-            break;
-        case ObjectKind::Prism: {
-              std::size_t pointCount = object.profileData.size() / 3U;
-              if (pointCount < 3U) {
-                  throw std::runtime_error("Prism profile has fewer than three points");
-              }
-              if (pointCount > 3U) {
-                  const std::size_t last = (pointCount - 1U) * 3U;
-                  if (std::abs(object.profileData[0] - object.profileData[last]) <= 1.0e-12 &&
-                      std::abs(object.profileData[1] - object.profileData[last + 1U]) <= 1.0e-12 &&
-                      std::abs(object.profileData[2] - object.profileData[last + 2U]) <= 1.0e-12) {
-                      --pointCount;
-                  }
-              }
-              BRepBuilderAPI_MakePolygon polygon;
-              for (std::size_t index = 0; index < pointCount; ++index) {
-                  const std::size_t base = index * 3U;
-                  polygon.Add(gp_Pnt(object.profileData[base],
-                                     object.profileData[base + 1U],
-                                     object.profileData[base + 2U]));
-              }
-              polygon.Close();
-              if (!polygon.IsDone()) {
-                  throw std::runtime_error("Unable to build prism polygon");
-              }
-              BRepBuilderAPI_MakeFace face(polygon.Wire());
-              if (!face.IsDone()) {
-                  throw std::runtime_error("Unable to build prism face");
-              }
-              BRepPrimAPI_MakePrism prism(
-                  face.Face(),
-                  gp_Vec(object.parameters[0], object.parameters[1], object.parameters[2]),
-                  Standard_True);
-              prism.Build();
-              if (!prism.IsDone()) {
-                  throw std::runtime_error("Unable to extrude prism face");
-              }
-              result = prism.Shape();
-              break;
-          }
-        case ObjectKind::Fuse:'''
+                      result = BRepPrimAPI_MakeTorus(
+                          object.parameters[0], object.parameters[1]).Shape();
+                      break;
+                  case ObjectKind::Prism: {
+                        std::size_t pointCount = object.profileData.size() / 3U;
+                        if (pointCount < 3U) {
+                            throw std::runtime_error("Prism profile has fewer than three points");
+                        }
+                        if (pointCount > 3U) {
+                            const std::size_t last = (pointCount - 1U) * 3U;
+                            if (std::abs(object.profileData[0] - object.profileData[last]) <= 1.0e-12 &&
+                                std::abs(object.profileData[1] - object.profileData[last + 1U]) <= 1.0e-12 &&
+                                std::abs(object.profileData[2] - object.profileData[last + 2U]) <= 1.0e-12) {
+                                --pointCount;
+                            }
+                        }
+                        BRepBuilderAPI_MakePolygon polygon;
+                        for (std::size_t index = 0; index < pointCount; ++index) {
+                            const std::size_t base = index * 3U;
+                            polygon.Add(gp_Pnt(object.profileData[base],
+                                               object.profileData[base + 1U],
+                                               object.profileData[base + 2U]));
+                        }
+                        polygon.Close();
+                        if (!polygon.IsDone()) {
+                            throw std::runtime_error("Unable to build prism polygon");
+                        }
+                        BRepBuilderAPI_MakeFace face(polygon.Wire());
+                        if (!face.IsDone()) {
+                            throw std::runtime_error("Unable to build prism face");
+                        }
+                        BRepPrimAPI_MakePrism prism(
+                            face.Face(),
+                            gp_Vec(object.parameters[0], object.parameters[1], object.parameters[2]),
+                            Standard_True);
+                        prism.Build();
+                        if (!prism.IsDone()) {
+                            throw std::runtime_error("Unable to extrude prism face");
+                        }
+                        result = prism.Shape();
+                        break;
+                    }
+                  case ObjectKind::Fuse:'''
           text = replace_once(text, torus_block, prism_block, 'Prism evaluator')
           core.write_text(text)
 
