@@ -1,6 +1,8 @@
 package com.medinaparra.freecadandroid.io
 
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.util.Locale
 import java.util.zip.ZipFile
 
@@ -14,8 +16,10 @@ data class FreeCadArchiveContent(
 /** Extracts the OpenCASCADE BREP payloads stored inside a FreeCAD FCStd ZIP. */
 object FreeCadArchiveReader {
     private const val maxEntries = 512
-    private const val maxSingleEntryBytes = 256L * 1024L * 1024L
-    private const val maxTotalBytes = 768L * 1024L * 1024L
+    private const val maxDocumentXmlBytes = 16L * 1024L * 1024L
+    private const val maxSingleEntryBytes = 128L * 1024L * 1024L
+    private const val maxTotalBytes = 384L * 1024L * 1024L
+    private const val maxArchiveBytes = 512L * 1024L * 1024L
 
     fun extract(
         archiveFile: File,
@@ -24,6 +28,9 @@ object FreeCadArchiveReader {
     ): FreeCadArchiveContent {
         require(archiveFile.isFile && archiveFile.length() > 0L) {
             "The selected FCStd document is empty"
+        }
+        require(archiveFile.length() <= maxArchiveBytes) {
+            "The selected FCStd document exceeds the mobile archive limit"
         }
 
         val directory = File(outputRoot, archiveFile.nameWithoutExtension).apply {
@@ -37,9 +44,9 @@ object FreeCadArchiveReader {
                 it.name.equals("Document.xml", ignoreCase = true)
             } ?: error("Document.xml is missing; this is not a supported FCStd document")
 
-            val documentXml = zip.getInputStream(documentEntry)
-                .bufferedReader(Charsets.UTF_8)
-                .use { it.readText() }
+            val documentXml = zip.getInputStream(documentEntry).use { input ->
+                readBounded(input, maxDocumentXmlBytes, "Document.xml").toString(Charsets.UTF_8)
+            }
 
             val documentName = Regex(
                 "<Document\\b[^>]*?\\bName=\"([^\"]+)\"",
@@ -82,9 +89,26 @@ object FreeCadArchiveReader {
                 require(target.canonicalPath.startsWith(rootPath)) {
                     "Invalid FCStd archive entry path"
                 }
-                zip.getInputStream(entry).use { input ->
-                    target.outputStream().buffered().use { output -> input.copyTo(output) }
+                val actualBytes = zip.getInputStream(entry).use { input ->
+                    target.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var entryBytes = 0L
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            entryBytes += count
+                            require(entryBytes <= maxSingleEntryBytes) {
+                                "BREP entry ${entry.name} exceeds the mobile extraction limit"
+                            }
+                            require(expandedBytes + entryBytes <= maxTotalBytes) {
+                                "Expanded FCStd geometry exceeds the mobile memory limit"
+                            }
+                            output.write(buffer, 0, count)
+                        }
+                        entryBytes
+                    }
                 }
+                if (entry.size <= 0L) expandedBytes += actualBytes
                 require(target.length() > 0L) { "BREP entry ${entry.name} is empty" }
                 target
             }
@@ -120,6 +144,20 @@ object FreeCadArchiveReader {
                 summary = summary
             )
         }
+    }
+
+    private fun readBounded(input: InputStream, limit: Long, label: String): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0L
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            total += count
+            require(total <= limit) { "$label exceeds the mobile parsing limit" }
+            output.write(buffer, 0, count)
+        }
+        return output.toByteArray()
     }
 
     private fun isBrep(name: String): Boolean {
