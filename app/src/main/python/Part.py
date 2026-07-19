@@ -8,7 +8,7 @@ All actual geometry is still evaluated by the native OpenCASCADE core.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
+import math
 import FreeCAD as App
 
 
