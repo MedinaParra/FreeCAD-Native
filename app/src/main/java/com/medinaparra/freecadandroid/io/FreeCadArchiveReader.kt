@@ -76,8 +76,7 @@ object FreeCadArchiveReader {
                     "BREP entry ${entry.name} is too large for this mobile build"
                 }
                 if (entry.size > 0L) {
-                    expandedBytes += entry.size
-                    require(expandedBytes <= maxTotalBytes) {
+                    require(expandedBytes + entry.size <= maxTotalBytes) {
                         "Expanded FCStd geometry exceeds the mobile memory limit"
                     }
                 }
@@ -108,7 +107,7 @@ object FreeCadArchiveReader {
                         entryBytes
                     }
                 }
-                if (entry.size <= 0L) expandedBytes += actualBytes
+                expandedBytes += actualBytes
                 require(target.length() > 0L) { "BREP entry ${entry.name} is empty" }
                 target
             }
