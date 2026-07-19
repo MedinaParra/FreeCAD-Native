@@ -444,7 +444,7 @@ jobs:
           for _name in ("Wire", "Face", "makePolygon"):
               if _name not in __all__:
                   __all__.append(_name)
-          '''.replace('          ', '')
+          ''')
           part.write_text(source)
 
           gradle = Path('app/build.gradle.kts')
