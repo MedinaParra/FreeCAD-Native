@@ -40,6 +40,8 @@ class ParamGet:
 def _install_vectors(app):
  V=app.Vector
  def vec(v): return v if isinstance(v,V) else V(*v)
+ V.__eq__=lambda s,o:isinstance(o,V) and math.isclose(s.x,o.x,abs_tol=1e-12) and math.isclose(s.y,o.y,abs_tol=1e-12) and math.isclose(s.z,o.z,abs_tol=1e-12)
+ V.isEqual=lambda s,o,tol=1e-7: isinstance(o,V) and (s-o).Length<=abs(float(tol))
  V.__add__=lambda s,o: V(s.x+vec(o).x,s.y+vec(o).y,s.z+vec(o).z)
  V.__sub__=lambda s,o: V(s.x-vec(o).x,s.y-vec(o).y,s.z-vec(o).z)
  V.__neg__=lambda s: V(-s.x,-s.y,-s.z)
