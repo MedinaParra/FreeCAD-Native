@@ -18,9 +18,12 @@
 #include <gp_Vec.hxx>
 
 #include <cmath>
+#include <functional>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace fcandroid {
 namespace {
@@ -220,9 +223,45 @@ bool CadCore::recompute(const std::uint64_t documentId) {
     document.lastError.clear();
 
     try {
+        // Resolve boolean dependencies explicitly. Operands may be reassigned after
+        // object creation, so insertion order alone is not a safe evaluation order.
+        std::unordered_map<std::uint64_t, unsigned char> visitState;
+        std::vector<std::uint64_t> evaluationOrder;
+        evaluationOrder.reserve(document.evaluationOrder.size());
+
+        std::function<void(std::uint64_t)> visit = [&](const std::uint64_t objectId) {
+            const unsigned char state = visitState[objectId];
+            if (state == 2U) {
+                return;
+            }
+            if (state == 1U) {
+                const CadObject& cyclic = requireObjectLocked(document, objectId);
+                throw std::runtime_error(
+                    "Boolean dependency cycle detected at " + cyclic.name);
+            }
+
+            visitState[objectId] = 1U;
+            const CadObject& object = requireObjectLocked(document, objectId);
+            if (object.kind == ObjectKind::Fuse ||
+                object.kind == ObjectKind::Cut ||
+                object.kind == ObjectKind::Common) {
+                visit(object.leftId);
+                visit(object.rightId);
+            }
+            visitState[objectId] = 2U;
+            evaluationOrder.push_back(objectId);
+        };
+
         for (const std::uint64_t objectId : document.evaluationOrder) {
-            CadObject& object = requireObjectLocked(document, objectId);
-            TopoDS_Shape shape = buildObjectShape(object, document);
+            visit(objectId);
+        }
+
+        // Recompute into a staging document. A failed OCCT operation must not
+        // leave a mixture of old and newly evaluated shapes visible to callers.
+        CadDocument staging = document;
+        for (const std::uint64_t objectId : evaluationOrder) {
+            CadObject& object = requireObjectLocked(staging, objectId);
+            TopoDS_Shape shape = buildObjectShape(object, staging);
             if (shape.IsNull()) {
                 throw std::runtime_error("OpenCASCADE returned a null shape for " + object.name);
             }
@@ -231,6 +270,10 @@ bool CadCore::recompute(const std::uint64_t documentId) {
                 throw std::runtime_error("BRep validation failed for " + object.name);
             }
             object.shape = std::move(shape);
+        }
+
+        for (const std::uint64_t objectId : document.evaluationOrder) {
+            document.objects.at(objectId).shape = staging.objects.at(objectId).shape;
         }
         return true;
     } catch (const Standard_Failure& failure) {
