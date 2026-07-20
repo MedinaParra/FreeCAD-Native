@@ -34,7 +34,7 @@ jobs:
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.1.0'
+          gradle-version: '9.3.1'
       - name: Test CAD core contract
         run: gradle :cadcore:testDebugUnitTest --stacktrace
       - name: Build CAD core AAR and demo APK
