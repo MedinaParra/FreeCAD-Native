@@ -37,7 +37,7 @@ jobs:
       - name: Install Android NDK
         run: |
           yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "ndk;${NDK_VERSION}" "platforms;android-36"
+          sdkmanager "ndk;${NDK_VERSION}" "platforms;android-35"
       - name: Download validated OCCT STEP runtime
         env:
           GH_TOKEN: ${{ github.token }}
@@ -84,6 +84,8 @@ jobs:
       - name: Verify AAR runtime payload
         run: |
           AAR=cadcore/build/outputs/aar/cadcore-release.aar
+          unzip -p "$AAR" META-INF/com/android/build/gradle/aar-metadata.properties \
+            | grep 'minCompileSdk=35'
           unzip -l "$AAR" | grep 'jni/arm64-v8a/libfreecad_android_bridge.so'
           unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKDESTEP.so'
           unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKXSBase.so'
@@ -97,7 +99,7 @@ jobs:
           mkdir -p artifacts
           cp cadcore/build/outputs/aar/cadcore-release.aar \
             artifacts/freecad-android-cadcore-step-v1.aar
-          printf 'OCCT_REF=V7_9_2\nSOURCE_RUN_ID=%s\nSOURCE_ARTIFACT=occt-step-arm64-v8a\n' \
+          printf 'OCCT_REF=V7_9_2\nCOMPILE_SDK=35\nSOURCE_RUN_ID=%s\nSOURCE_ARTIFACT=occt-step-arm64-v8a\n' \
             "$SOURCE_RUN_ID" > artifacts/RUNTIME_INFO.txt
           sha256sum artifacts/freecad-android-cadcore-step-v1.aar \
             | tee artifacts/SHA256SUMS.txt
@@ -115,10 +117,10 @@ jobs:
           TAG=cadcore-step-v1
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
-              --notes "Validated OCCT 7.9.2 arm64 STEP runtime with reusable Android cadcore AAR."
+              --notes "Validated OCCT 7.9.2 arm64 STEP runtime, compileSdk 35, reusable Android cadcore AAR."
           else
             gh release create "$TAG" --target "$TARGET_SHA" \
               --title "FreeCAD Android CAD Core STEP v1" \
-              --notes "Validated OCCT 7.9.2 arm64 STEP runtime with reusable Android cadcore AAR."
+              --notes "Validated OCCT 7.9.2 arm64 STEP runtime, compileSdk 35, reusable Android cadcore AAR."
           fi
           gh release upload "$TAG" artifacts/* --clobber
