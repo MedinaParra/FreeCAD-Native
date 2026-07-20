@@ -1,0 +1,119 @@
+name: Package validated OCCT CAD core AAR
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - product/android-cad-core-sdk-v1
+    paths:
+      - 'cadcore/**'
+      - '.github/workflows/package-validated-occt-cadcore.yml'
+  pull_request:
+    paths:
+      - 'cadcore/**'
+      - '.github/workflows/package-validated-occt-cadcore.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  package-cadcore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SOURCE_RUN_ID: 29657827165
+      NDK_VERSION: 28.2.13676358
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Install Android NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "ndk;${NDK_VERSION}" "platforms;android-36"
+      - name: Download validated OCCT STEP runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          INSTALL="$GITHUB_WORKSPACE/build/validated-occt"
+          mkdir -p "$INSTALL"
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name occt-step-arm64-v8a --dir "$INSTALL"
+          test -f "$INSTALL/include/opencascade/STEPControl_Reader.hxx"
+          test -f "$INSTALL/lib/libTKDESTEP.so"
+          test -f "$INSTALL/lib/libTKXSBase.so"
+          test -f "$INSTALL/lib/libTKBRep.so"
+          test -f "$INSTALL/lib/libTKMesh.so"
+          test -d "$INSTALL/resources/XSTEPResource"
+          echo "OCCT_ROOT=$INSTALL" >> "$GITHUB_ENV"
+      - name: Stage JNI libraries and OCCT resources
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+        run: |
+          JNI="$GITHUB_WORKSPACE/build/occt-jni/arm64-v8a"
+          ASSETS="$GITHUB_WORKSPACE/build/occt-assets/occt"
+          mkdir -p "$JNI" "$ASSETS"
+          cp "$OCCT_ROOT"/lib/*.so "$JNI"/
+          CXX_SHARED=$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -type f -name libc++_shared.so | head -n 1)
+          test -n "$CXX_SHARED"
+          cp "$CXX_SHARED" "$JNI/libc++_shared.so"
+          for directory in SHMessage XSMessage StdResource XSTEPResource; do
+            cp -R "$OCCT_ROOT/resources/$directory" "$ASSETS/$directory"
+          done
+          echo "OCCT_JNI=$GITHUB_WORKSPACE/build/occt-jni" >> "$GITHUB_ENV"
+          echo "OCCT_ASSETS=$GITHUB_WORKSPACE/build/occt-assets" >> "$GITHUB_ENV"
+      - name: Build STEP-enabled cadcore AAR
+        run: |
+          gradle :cadcore:clean :cadcore:assembleRelease --stacktrace \
+            -PocctRoot="$OCCT_ROOT" \
+            -PocctJni="$OCCT_JNI" \
+            -PocctAssets="$OCCT_ASSETS"
+      - name: Verify AAR runtime payload
+        run: |
+          AAR=cadcore/build/outputs/aar/cadcore-release.aar
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libfreecad_android_bridge.so'
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKDESTEP.so'
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKXSBase.so'
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKBRep.so'
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKMesh.so'
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libc++_shared.so'
+          unzip -l "$AAR" | grep 'assets/occt/XSTEPResource/'
+          unzip -l "$AAR" | grep 'assets/occt/SHMessage/'
+      - name: Prepare public SDK artifact
+        run: |
+          mkdir -p artifacts
+          cp cadcore/build/outputs/aar/cadcore-release.aar \
+            artifacts/freecad-android-cadcore-step-v1.aar
+          printf 'OCCT_REF=V7_9_2\nSOURCE_RUN_ID=%s\nSOURCE_ARTIFACT=occt-step-arm64-v8a\n' \
+            "$SOURCE_RUN_ID" > artifacts/RUNTIME_INFO.txt
+          sha256sum artifacts/freecad-android-cadcore-step-v1.aar \
+            | tee artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freecad-android-cadcore-step-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish stable public SDK release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=cadcore-step-v1
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push --force origin "refs/tags/$TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
+              --notes "Validated OCCT 7.9.2 arm64 STEP runtime with reusable Android cadcore AAR."
+          else
+            gh release create "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
+              --notes "Validated OCCT 7.9.2 arm64 STEP runtime with reusable Android cadcore AAR."
+          fi
+          gh release upload "$TAG" artifacts/* --clobber
