@@ -13,6 +13,7 @@ set(OCCT_ANDROID_ROOT "" CACHE PATH "Installed OCCT Android runtime root")
 if(OCCT_ANDROID_ROOT AND EXISTS "${OCCT_ANDROID_ROOT}/include/opencascade/Standard.hxx")
     set(OCCT_DIRECT_TOOLKITS
             TKDESTEP
+            TKXSBase
             TKMesh
             TKTopAlgo
             TKBRep
