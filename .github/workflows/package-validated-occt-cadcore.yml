@@ -113,14 +113,12 @@ jobs:
           TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           TAG=cadcore-step-v1
-          git fetch --no-tags origin "$TARGET_SHA"
-          git tag -f "$TAG" "$TARGET_SHA"
-          git push --force origin "refs/tags/$TAG"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
               --notes "Validated OCCT 7.9.2 arm64 STEP runtime with reusable Android cadcore AAR."
           else
-            gh release create "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
+            gh release create "$TAG" --target "$TARGET_SHA" \
+              --title "FreeCAD Android CAD Core STEP v1" \
               --notes "Validated OCCT 7.9.2 arm64 STEP runtime with reusable Android cadcore AAR."
           fi
           gh release upload "$TAG" artifacts/* --clobber
