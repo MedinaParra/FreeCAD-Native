@@ -1,0 +1,53 @@
+name: Build FreeCAD Android CAD core SDK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - product/android-cad-core-sdk-v1
+    paths:
+      - 'cadcore/**'
+      - 'app/**'
+      - 'gradle/**'
+      - '*.gradle.kts'
+      - '.github/workflows/build-cadcore-sdk.yml'
+  pull_request:
+    paths:
+      - 'cadcore/**'
+      - 'app/**'
+      - 'gradle/**'
+      - '*.gradle.kts'
+      - '.github/workflows/build-cadcore-sdk.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Test CAD core contract
+        run: gradle :cadcore:testDebugUnitTest --stacktrace
+      - name: Build CAD core AAR and demo APK
+        run: gradle :cadcore:assembleRelease :app:assembleDebug --stacktrace
+      - name: Prepare artifacts
+        run: |
+          mkdir -p artifacts
+          cp cadcore/build/outputs/aar/cadcore-release.aar artifacts/freecad-android-cadcore-v1.aar
+          cp app/build/outputs/apk/debug/app-debug.apk artifacts/FreeCAD-Native-demo.apk
+          sha256sum artifacts/* | tee artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freecad-android-cadcore-v1
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,100 @@
+name: Build experimental OCCT 8 Android arm64 runtime
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-occt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      OCCT_REF: V8_0_0
+      OCCT_EXPECTED_PREFIX: d3056ef
+      ANDROID_ABI: arm64-v8a
+      ANDROID_PLATFORM: android-24
+      NDK_VERSION: 28.2.13676358
+      JOBS: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Install Android NDK and Ninja
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "ndk;${NDK_VERSION}"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+      - name: Build pinned OCCT runtime
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          ROOT: ${{ github.workspace }}/build/occt-android
+        run: |
+          set -o pipefail
+          bash native/occt/build_occt_android.sh 2>&1 | tee occt-build.log
+      - name: Upload OCCT diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: occt-build-diagnostics
+          path: occt-build.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Stage Android libraries and STEP resources
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+        run: |
+          INSTALL="$GITHUB_WORKSPACE/build/occt-android/install-arm64-v8a"
+          JNI="$GITHUB_WORKSPACE/build/occt-jni/arm64-v8a"
+          ASSETS="$GITHUB_WORKSPACE/build/occt-assets/occt"
+          mkdir -p "$JNI" "$ASSETS"
+          cp "$INSTALL"/lib/*.so "$JNI"/
+          CXX_SHARED=$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -type f -name libc++_shared.so | head -n 1)
+          test -n "$CXX_SHARED"
+          cp "$CXX_SHARED" "$JNI/libc++_shared.so"
+          RESOURCE_DIR=$(dirname "$(find "$INSTALL" -type d -name XSTEPResource | head -n 1)")
+          test -d "$RESOURCE_DIR/XSTEPResource"
+          for directory in SHMessage XSMessage StdResource XSTEPResource; do
+            cp -R "$RESOURCE_DIR/$directory" "$ASSETS/$directory"
+          done
+          echo "OCCT_ROOT=$INSTALL" >> "$GITHUB_ENV"
+          echo "OCCT_JNI=$GITHUB_WORKSPACE/build/occt-jni" >> "$GITHUB_ENV"
+          echo "OCCT_ASSETS=$GITHUB_WORKSPACE/build/occt-assets" >> "$GITHUB_ENV"
+      - name: Build STEP-enabled CAD core AAR
+        run: |
+          gradle :cadcore:assembleRelease --stacktrace \
+            -PocctRoot="$OCCT_ROOT" \
+            -PocctJni="$OCCT_JNI" \
+            -PocctAssets="$OCCT_ASSETS"
+      - name: Verify linked AAR contents
+        run: |
+          AAR=cadcore/build/outputs/aar/cadcore-release.aar
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libfreecad_android_bridge.so'
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKDESTEP.so'
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKMesh.so'
+          unzip -l "$AAR" | grep 'jni/arm64-v8a/libc++_shared.so'
+          unzip -l "$AAR" | grep 'assets/occt/XSTEPResource/'
+      - name: Package experimental runtime and SDK
+        run: |
+          cd build/occt-android/install-arm64-v8a
+          tar -czf "${GITHUB_WORKSPACE}/occt-8.0.0-android-arm64-v8a.tar.gz" .
+          cd "${GITHUB_WORKSPACE}"
+          cp cadcore/build/outputs/aar/cadcore-release.aar freecad-android-cadcore-step-v1.aar
+          sha256sum occt-8.0.0-android-arm64-v8a.tar.gz freecad-android-cadcore-step-v1.aar | tee SHA256SUMS-OCCT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: experimental-occt-8.0.0-android-arm64
+          path: |
+            occt-8.0.0-android-arm64-v8a.tar.gz
+            freecad-android-cadcore-step-v1.aar
+            SHA256SUMS-OCCT.txt
+          if-no-files-found: error
+          retention-days: 30
