@@ -1,0 +1,57 @@
+name: Build OCCT 8 Android arm64 runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - product/android-cad-core-sdk-v1
+    paths:
+      - 'native/occt/**'
+      - '.github/workflows/build-occt-android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-occt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      OCCT_REF: V8_0_0
+      OCCT_EXPECTED_PREFIX: d3056ef
+      ANDROID_ABI: arm64-v8a
+      ANDROID_PLATFORM: android-24
+      NDK_VERSION: 28.2.13676358
+      JOBS: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android NDK and Ninja
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "ndk;${NDK_VERSION}"
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
+      - name: Build pinned OCCT runtime
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          ROOT: ${{ github.workspace }}/build/occt-android
+        run: bash native/occt/build_occt_android.sh
+      - name: Package runtime
+        run: |
+          cd build/occt-android/install-arm64-v8a
+          tar -czf "${GITHUB_WORKSPACE}/occt-8.0.0-android-arm64-v8a.tar.gz" .
+          cd "${GITHUB_WORKSPACE}"
+          sha256sum occt-8.0.0-android-arm64-v8a.tar.gz | tee SHA256SUMS-OCCT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: occt-8.0.0-android-arm64-v8a
+          path: |
+            occt-8.0.0-android-arm64-v8a.tar.gz
+            SHA256SUMS-OCCT.txt
+          if-no-files-found: error
+          retention-days: 30
