@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "FreeCADAndroidNative"
 include(":app")
+include(":cadcore")
