@@ -8,6 +8,10 @@ on:
     paths:
       - 'native/occt/**'
       - '.github/workflows/build-occt-android.yml'
+  pull_request:
+    paths:
+      - 'native/occt/**'
+      - '.github/workflows/build-occt-android.yml'
 
 permissions:
   contents: read
