@@ -3,9 +3,23 @@ project(freecad_android_bridge LANGUAGES CXX)
 
 add_library(freecad_android_bridge SHARED freecad_android_bridge.cpp)
 target_compile_features(freecad_android_bridge PRIVATE cxx_std_17)
+target_compile_options(freecad_android_bridge PRIVATE -Wall -Wextra -Wpedantic)
+target_link_options(freecad_android_bridge PRIVATE -Wl,--no-undefined)
 
 find_library(log-lib log)
 target_link_libraries(freecad_android_bridge PRIVATE ${log-lib})
 
-# A production build can define FREECAD_OCC_AVAILABLE and link FreeCADApp,
-# TKernel, TKSTEP, TKMesh and their transitive OpenCascade dependencies.
+set(OCCT_ANDROID_ROOT "" CACHE PATH "Installed OCCT Android runtime root")
+if(OCCT_ANDROID_ROOT AND EXISTS "${OCCT_ANDROID_ROOT}/include/opencascade/Standard.hxx")
+    file(GLOB OCCT_SHARED_LIBS "${OCCT_ANDROID_ROOT}/lib/*.so")
+    if(NOT OCCT_SHARED_LIBS)
+        message(FATAL_ERROR "OCCT_ANDROID_ROOT has headers but no shared libraries")
+    endif()
+    target_compile_definitions(freecad_android_bridge PRIVATE FREECAD_OCC_AVAILABLE=1)
+    target_include_directories(freecad_android_bridge PRIVATE
+            "${OCCT_ANDROID_ROOT}/include/opencascade")
+    target_link_libraries(freecad_android_bridge PRIVATE ${OCCT_SHARED_LIBS})
+    message(STATUS "Building STEP-enabled bridge with OCCT from ${OCCT_ANDROID_ROOT}")
+else()
+    message(STATUS "Building diagnostic bridge without OCCT STEP kernel")
+endif()
