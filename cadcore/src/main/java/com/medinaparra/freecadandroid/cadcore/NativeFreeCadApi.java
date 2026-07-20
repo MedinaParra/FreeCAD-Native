@@ -7,6 +7,7 @@ final class NativeFreeCadApi {
     static native String runtimeInfo();
     static native long capabilitiesMask();
     static native String lastError();
+    static native boolean initializeResources(String resourceRoot);
     static native long importStep(String absolutePath, double linearDeflection,
                                   double angularDeflectionDegrees);
     static native float[] meshVertices(long handle);
