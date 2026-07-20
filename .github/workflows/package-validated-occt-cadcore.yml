@@ -69,6 +69,12 @@ jobs:
           done
           echo "OCCT_JNI=$GITHUB_WORKSPACE/build/occt-jni" >> "$GITHUB_ENV"
           echo "OCCT_ASSETS=$GITHUB_WORKSPACE/build/occt-assets" >> "$GITHUB_ENV"
+      - name: Stamp validated runtime version
+        run: |
+          sed -i 's/OCCT 8.0.0 Android STEP bridge 2.0/OCCT 7.9.2 Android STEP bridge 2.0/' \
+            cadcore/src/main/cpp/freecad_android_bridge.cpp
+          grep -q 'OCCT 7.9.2 Android STEP bridge 2.0' \
+            cadcore/src/main/cpp/freecad_android_bridge.cpp
       - name: Build STEP-enabled cadcore AAR
         run: |
           gradle :cadcore:clean :cadcore:assembleRelease --stacktrace \
