@@ -15,7 +15,11 @@ if(OCCT_ANDROID_ROOT AND EXISTS "${OCCT_ANDROID_ROOT}/include/opencascade/Standa
     if(NOT OCCT_SHARED_LIBS)
         message(FATAL_ERROR "OCCT_ANDROID_ROOT has headers but no shared libraries")
     endif()
-    target_compile_definitions(freecad_android_bridge PRIVATE FREECAD_OCC_AVAILABLE=1)
+    # OCCT 7.9 exposes opencascade::handle while newer source variants may use
+    # a short occ alias. The preprocessor alias keeps one bridge source compatible.
+    target_compile_definitions(freecad_android_bridge PRIVATE
+            FREECAD_OCC_AVAILABLE=1
+            occ=opencascade)
     target_include_directories(freecad_android_bridge PRIVATE
             "${OCCT_ANDROID_ROOT}/include/opencascade")
     target_link_libraries(freecad_android_bridge PRIVATE ${OCCT_SHARED_LIBS})
