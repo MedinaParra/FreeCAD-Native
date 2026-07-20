@@ -49,7 +49,17 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
           ROOT: ${{ github.workspace }}/build/occt-android
-        run: bash native/occt/build_occt_android.sh
+        run: |
+          set -o pipefail
+          bash native/occt/build_occt_android.sh 2>&1 | tee occt-build.log
+      - name: Upload OCCT diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: occt-build-diagnostics
+          path: occt-build.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Stage Android libraries and STEP resources
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
