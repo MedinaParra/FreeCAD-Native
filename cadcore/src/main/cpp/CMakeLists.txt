@@ -11,10 +11,22 @@ target_link_libraries(freecad_android_bridge PRIVATE ${log-lib})
 
 set(OCCT_ANDROID_ROOT "" CACHE PATH "Installed OCCT Android runtime root")
 if(OCCT_ANDROID_ROOT AND EXISTS "${OCCT_ANDROID_ROOT}/include/opencascade/Standard.hxx")
-    file(GLOB OCCT_SHARED_LIBS "${OCCT_ANDROID_ROOT}/lib/*.so")
-    if(NOT OCCT_SHARED_LIBS)
-        message(FATAL_ERROR "OCCT_ANDROID_ROOT has headers but no shared libraries")
-    endif()
+    set(OCCT_DIRECT_TOOLKITS
+            TKDESTEP
+            TKMesh
+            TKTopAlgo
+            TKBRep
+            TKMath
+            TKernel)
+    set(OCCT_DIRECT_LIBS "")
+    foreach(TOOLKIT IN LISTS OCCT_DIRECT_TOOLKITS)
+        set(TOOLKIT_PATH "${OCCT_ANDROID_ROOT}/lib/lib${TOOLKIT}.so")
+        if(NOT EXISTS "${TOOLKIT_PATH}")
+            message(FATAL_ERROR "Required OCCT toolkit is missing: ${TOOLKIT_PATH}")
+        endif()
+        list(APPEND OCCT_DIRECT_LIBS "${TOOLKIT_PATH}")
+    endforeach()
+
     # OCCT 7.9 exposes opencascade::handle while newer source variants may use
     # a short occ alias. The preprocessor alias keeps one bridge source compatible.
     target_compile_definitions(freecad_android_bridge PRIVATE
@@ -22,8 +34,8 @@ if(OCCT_ANDROID_ROOT AND EXISTS "${OCCT_ANDROID_ROOT}/include/opencascade/Standa
             occ=opencascade)
     target_include_directories(freecad_android_bridge PRIVATE
             "${OCCT_ANDROID_ROOT}/include/opencascade")
-    target_link_libraries(freecad_android_bridge PRIVATE ${OCCT_SHARED_LIBS})
-    message(STATUS "Building STEP-enabled bridge with OCCT from ${OCCT_ANDROID_ROOT}")
+    target_link_libraries(freecad_android_bridge PRIVATE ${OCCT_DIRECT_LIBS})
+    message(STATUS "Building STEP-enabled bridge with minimal OCCT roots: ${OCCT_DIRECT_TOOLKITS}")
 else()
     message(STATUS "Building diagnostic bridge without OCCT STEP kernel")
 endif()
