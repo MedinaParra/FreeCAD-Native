@@ -2,6 +2,10 @@ plugins {
     alias(libs.plugins.android.library)
 }
 
+val occtRoot = providers.gradleProperty("occtRoot").orNull
+val occtJni = providers.gradleProperty("occtJni").orNull
+val occtAssets = providers.gradleProperty("occtAssets").orNull
+
 android {
     namespace = "com.medinaparra.freecadandroid.cadcore"
     compileSdk = 36
@@ -12,6 +16,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
+                arguments += "-DOCCT_ANDROID_ROOT=${occtRoot ?: ""}"
             }
         }
         ndk {
@@ -23,6 +28,17 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            if (!occtJni.isNullOrBlank()) {
+                jniLibs.srcDir(occtJni)
+            }
+            if (!occtAssets.isNullOrBlank()) {
+                assets.srcDir(occtAssets)
+            }
         }
     }
 
