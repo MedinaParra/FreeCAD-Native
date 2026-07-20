@@ -92,10 +92,20 @@ jobs:
             cadcore/src/main/cpp/freecad_android_bridge.cpp
       - name: Build STEP-enabled cadcore AAR
         run: |
+          set -o pipefail
+          mkdir -p artifacts
           gradle :cadcore:clean :cadcore:assembleRelease --stacktrace \
             -PocctRoot="$OCCT_ROOT" \
             -PocctJni="$OCCT_JNI" \
-            -PocctAssets="$OCCT_ASSETS"
+            -PocctAssets="$OCCT_ASSETS" 2>&1 | tee artifacts/cadcore-build.log
+      - name: Upload CAD core build diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cadcore-step-v2-build-diagnostic
+          path: artifacts/cadcore-build.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify minimal AAR runtime payload and ELF closure
         run: |
           set -euo pipefail
@@ -142,7 +152,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: freecad-android-cadcore-step-v2
-          path: artifacts/
+          path: |
+            artifacts/freecad-android-cadcore-step-v2.aar
+            artifacts/NATIVE_CLOSURE.json
+            artifacts/RUNTIME_INFO.txt
+            artifacts/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
       - name: Publish stable public SDK release
@@ -159,4 +173,5 @@ jobs:
               --title "FreeCAD Android CAD Core STEP v2" \
               --notes "Pruned OCCT 7.9.2 arm64 STEP runtime with deterministic 24-library dependency closure and reusable Android cadcore AAR."
           fi
-          gh release upload "$TAG" artifacts/* --clobber
+          gh release upload "$TAG" artifacts/freecad-android-cadcore-step-v2.aar \
+            artifacts/NATIVE_CLOSURE.json artifacts/RUNTIME_INFO.txt artifacts/SHA256SUMS.txt --clobber
