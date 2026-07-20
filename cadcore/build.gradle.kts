@@ -8,7 +8,7 @@ val occtAssets = providers.gradleProperty("occtAssets").orNull
 
 android {
     namespace = "com.medinaparra.freecadandroid.cadcore"
-    compileSdk = 36
+    compileSdk = 35
 
     defaultConfig {
         minSdk = 24
