@@ -113,6 +113,7 @@ jobs:
           TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           TAG=cadcore-step-v1
+          git fetch --no-tags origin "$TARGET_SHA"
           git tag -f "$TAG" "$TARGET_SHA"
           git push --force origin "refs/tags/$TAG"
           if gh release view "$TAG" >/dev/null 2>&1; then
