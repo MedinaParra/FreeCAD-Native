@@ -16,7 +16,7 @@ on:
       - '.github/workflows/build-occt-android.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-occt:
@@ -110,3 +110,22 @@ jobs:
             SHA256SUMS-OCCT.txt
           if-no-files-found: error
           retention-days: 30
+      - name: Publish stable public SDK release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=cadcore-step-v1
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push --force origin "refs/tags/$TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
+              --notes "Pinned OCCT 8.0.0 Android arm64 runtime and reusable STEP-enabled cadcore AAR."
+          else
+            gh release create "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
+              --notes "Pinned OCCT 8.0.0 Android arm64 runtime and reusable STEP-enabled cadcore AAR."
+          fi
+          gh release upload "$TAG" \
+            freecad-android-cadcore-step-v1.aar \
+            occt-8.0.0-android-arm64-v8a.tar.gz \
+            SHA256SUMS-OCCT.txt --clobber
