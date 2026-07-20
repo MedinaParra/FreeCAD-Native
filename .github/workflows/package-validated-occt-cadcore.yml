@@ -7,10 +7,12 @@ on:
       - product/android-cad-core-sdk-v1
     paths:
       - 'cadcore/**'
+      - 'tools/stage_android_native_closure.py'
       - '.github/workflows/package-validated-occt-cadcore.yml'
   pull_request:
     paths:
       - 'cadcore/**'
+      - 'tools/stage_android_native_closure.py'
       - '.github/workflows/package-validated-occt-cadcore.yml'
 
 permissions:
@@ -53,17 +55,30 @@ jobs:
           test -f "$INSTALL/lib/libTKMesh.so"
           test -d "$INSTALL/resources/XSTEPResource"
           echo "OCCT_ROOT=$INSTALL" >> "$GITHUB_ENV"
-      - name: Stage JNI libraries and OCCT resources
+      - name: Stage minimal JNI dependency closure and OCCT resources
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
         run: |
+          set -euo pipefail
           JNI="$GITHUB_WORKSPACE/build/occt-jni/arm64-v8a"
           ASSETS="$GITHUB_WORKSPACE/build/occt-assets/occt"
           mkdir -p "$JNI" "$ASSETS"
-          cp "$OCCT_ROOT"/lib/*.so "$JNI"/
           CXX_SHARED=$(find "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt" -type f -name libc++_shared.so | head -n 1)
           test -n "$CXX_SHARED"
-          cp "$CXX_SHARED" "$JNI/libc++_shared.so"
+          cp "$CXX_SHARED" "$OCCT_ROOT/lib/libc++_shared.so"
+          python3 tools/stage_android_native_closure.py \
+            --lib-dir "$OCCT_ROOT/lib" \
+            --output "$JNI" \
+            --manifest "$ASSETS/NATIVE_CLOSURE.json" \
+            --root libTKDESTEP.so \
+            --root libTKMesh.so \
+            --root libTKTopAlgo.so \
+            --root libTKBRep.so \
+            --root libTKMath.so \
+            --root libTKernel.so
+          test "$(find "$JNI" -maxdepth 1 -type f -name '*.so' | wc -l)" -eq 24
+          test ! -f "$JNI/libTKOpenGles.so"
+          test ! -f "$JNI/libTKDEGLTF.so"
           for directory in SHMessage XSMessage StdResource XSTEPResource; do
             cp -R "$OCCT_ROOT/resources/$directory" "$ASSETS/$directory"
           done
@@ -71,9 +86,9 @@ jobs:
           echo "OCCT_ASSETS=$GITHUB_WORKSPACE/build/occt-assets" >> "$GITHUB_ENV"
       - name: Stamp validated runtime version
         run: |
-          sed -i 's/OCCT 8.0.0 Android STEP bridge 2.0/OCCT 7.9.2 Android STEP bridge 2.0/' \
+          sed -i 's/OCCT 8.0.0 Android STEP bridge 2.0/OCCT 7.9.2 Android STEP bridge 2.1/' \
             cadcore/src/main/cpp/freecad_android_bridge.cpp
-          grep -q 'OCCT 7.9.2 Android STEP bridge 2.0' \
+          grep -q 'OCCT 7.9.2 Android STEP bridge 2.1' \
             cadcore/src/main/cpp/freecad_android_bridge.cpp
       - name: Build STEP-enabled cadcore AAR
         run: |
@@ -81,31 +96,52 @@ jobs:
             -PocctRoot="$OCCT_ROOT" \
             -PocctJni="$OCCT_JNI" \
             -PocctAssets="$OCCT_ASSETS"
-      - name: Verify AAR runtime payload
+      - name: Verify minimal AAR runtime payload and ELF closure
         run: |
+          set -euo pipefail
           AAR=cadcore/build/outputs/aar/cadcore-release.aar
-          unzip -p "$AAR" META-INF/com/android/build/gradle/aar-metadata.properties \
-            | grep 'minCompileSdk=35'
-          unzip -l "$AAR" | grep 'jni/arm64-v8a/libfreecad_android_bridge.so'
-          unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKDESTEP.so'
-          unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKXSBase.so'
-          unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKBRep.so'
-          unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKMesh.so'
-          unzip -l "$AAR" | grep 'jni/arm64-v8a/libc++_shared.so'
-          unzip -l "$AAR" | grep 'assets/occt/XSTEPResource/'
-          unzip -l "$AAR" | grep 'assets/occt/SHMessage/'
+          CHECK="$RUNNER_TEMP/cadcore-check"
+          rm -rf "$CHECK" && mkdir -p "$CHECK"
+          unzip -q "$AAR" -d "$CHECK"
+          grep 'minCompileSdk=35' "$CHECK/META-INF/com/android/build/gradle/aar-metadata.properties"
+          test -f "$CHECK/jni/arm64-v8a/libfreecad_android_bridge.so"
+          test -f "$CHECK/jni/arm64-v8a/libTKDESTEP.so"
+          test -f "$CHECK/jni/arm64-v8a/libTKXSBase.so"
+          test -f "$CHECK/jni/arm64-v8a/libTKBRep.so"
+          test -f "$CHECK/jni/arm64-v8a/libTKMesh.so"
+          test -f "$CHECK/jni/arm64-v8a/libc++_shared.so"
+          test -f "$CHECK/assets/occt/NATIVE_CLOSURE.json"
+          test -d "$CHECK/assets/occt/XSTEPResource"
+          test -d "$CHECK/assets/occt/SHMessage"
+          COUNT=$(find "$CHECK/jni/arm64-v8a" -maxdepth 1 -type f -name '*.so' | wc -l)
+          test "$COUNT" -eq 25
+          test ! -f "$CHECK/jni/arm64-v8a/libTKOpenGles.so"
+          test ! -f "$CHECK/jni/arm64-v8a/libTKDEGLTF.so"
+          readelf -d "$CHECK/jni/arm64-v8a/libfreecad_android_bridge.so" | tee "$CHECK/BRIDGE_NEEDED.txt"
+          grep -q 'libTKDESTEP.so' "$CHECK/BRIDGE_NEEDED.txt"
+          grep -q 'libTKMesh.so' "$CHECK/BRIDGE_NEEDED.txt"
+          ! grep -q 'libTKOpenGles.so' "$CHECK/BRIDGE_NEEDED.txt"
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest=json.loads(Path("${{ runner.temp }}/cadcore-check/assets/occt/NATIVE_CLOSURE.json").read_text())
+          assert manifest["libraryCount"] == 24, manifest
+          assert manifest["totalBytes"] > 0
+          print("Verified native closure:", manifest["libraryCount"], "libraries", manifest["totalBytes"], "bytes")
+          PY
       - name: Prepare public SDK artifact
         run: |
           mkdir -p artifacts
           cp cadcore/build/outputs/aar/cadcore-release.aar \
-            artifacts/freecad-android-cadcore-step-v1.aar
-          printf 'OCCT_REF=V7_9_2\nCOMPILE_SDK=35\nSOURCE_RUN_ID=%s\nSOURCE_ARTIFACT=occt-step-arm64-v8a\n' \
+            artifacts/freecad-android-cadcore-step-v2.aar
+          cp "$OCCT_ASSETS/occt/NATIVE_CLOSURE.json" artifacts/NATIVE_CLOSURE.json
+          printf 'OCCT_REF=V7_9_2\nBRIDGE_VERSION=2.1\nCOMPILE_SDK=35\nNATIVE_LIBRARY_COUNT=25\nSOURCE_RUN_ID=%s\nSOURCE_ARTIFACT=occt-step-arm64-v8a\n' \
             "$SOURCE_RUN_ID" > artifacts/RUNTIME_INFO.txt
-          sha256sum artifacts/freecad-android-cadcore-step-v1.aar \
+          sha256sum artifacts/freecad-android-cadcore-step-v2.aar \
             | tee artifacts/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: freecad-android-cadcore-step-v1
+          name: freecad-android-cadcore-step-v2
           path: artifacts/
           if-no-files-found: error
           retention-days: 30
@@ -114,13 +150,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          TAG=cadcore-step-v1
+          TAG=cadcore-step-v2
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
-              --notes "Validated OCCT 7.9.2 arm64 STEP runtime, compileSdk 35, reusable Android cadcore AAR."
+            gh release edit "$TAG" --title "FreeCAD Android CAD Core STEP v2" \
+              --notes "Pruned OCCT 7.9.2 arm64 STEP runtime with deterministic 24-library dependency closure and reusable Android cadcore AAR."
           else
             gh release create "$TAG" --target "$TARGET_SHA" \
-              --title "FreeCAD Android CAD Core STEP v1" \
-              --notes "Validated OCCT 7.9.2 arm64 STEP runtime, compileSdk 35, reusable Android cadcore AAR."
+              --title "FreeCAD Android CAD Core STEP v2" \
+              --notes "Pruned OCCT 7.9.2 arm64 STEP runtime with deterministic 24-library dependency closure and reusable Android cadcore AAR."
           fi
           gh release upload "$TAG" artifacts/* --clobber
