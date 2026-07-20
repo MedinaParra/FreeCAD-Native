@@ -108,12 +108,12 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Publish stable public SDK release
-        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           TAG=cadcore-step-v1
-          git tag -f "$TAG" "$GITHUB_SHA"
+          git tag -f "$TAG" "$TARGET_SHA"
           git push --force origin "refs/tags/$TAG"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
