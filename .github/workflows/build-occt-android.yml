@@ -1,19 +1,7 @@
-name: Build OCCT 8 Android arm64 runtime
+name: Build experimental OCCT 8 Android arm64 runtime
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - product/android-cad-core-sdk-v1
-    paths:
-      - 'native/occt/**'
-      - 'cadcore/**'
-      - '.github/workflows/build-occt-android.yml'
-  pull_request:
-    paths:
-      - 'native/occt/**'
-      - 'cadcore/**'
-      - '.github/workflows/build-occt-android.yml'
 
 permissions:
   contents: write
@@ -94,7 +82,7 @@ jobs:
           unzip -l "$AAR" | grep 'jni/arm64-v8a/libTKMesh.so'
           unzip -l "$AAR" | grep 'jni/arm64-v8a/libc++_shared.so'
           unzip -l "$AAR" | grep 'assets/occt/XSTEPResource/'
-      - name: Package runtime and SDK
+      - name: Package experimental runtime and SDK
         run: |
           cd build/occt-android/install-arm64-v8a
           tar -czf "${GITHUB_WORKSPACE}/occt-8.0.0-android-arm64-v8a.tar.gz" .
@@ -103,29 +91,10 @@ jobs:
           sha256sum occt-8.0.0-android-arm64-v8a.tar.gz freecad-android-cadcore-step-v1.aar | tee SHA256SUMS-OCCT.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: freecad-android-cadcore-step-v1
+          name: experimental-occt-8.0.0-android-arm64
           path: |
             occt-8.0.0-android-arm64-v8a.tar.gz
             freecad-android-cadcore-step-v1.aar
             SHA256SUMS-OCCT.txt
           if-no-files-found: error
           retention-days: 30
-      - name: Publish stable public SDK release
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG=cadcore-step-v1
-          git tag -f "$TAG" "$GITHUB_SHA"
-          git push --force origin "refs/tags/$TAG"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
-              --notes "Pinned OCCT 8.0.0 Android arm64 runtime and reusable STEP-enabled cadcore AAR."
-          else
-            gh release create "$TAG" --title "FreeCAD Android CAD Core STEP v1" \
-              --notes "Pinned OCCT 8.0.0 Android arm64 runtime and reusable STEP-enabled cadcore AAR."
-          fi
-          gh release upload "$TAG" \
-            freecad-android-cadcore-step-v1.aar \
-            occt-8.0.0-android-arm64-v8a.tar.gz \
-            SHA256SUMS-OCCT.txt --clobber
