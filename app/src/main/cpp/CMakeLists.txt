@@ -43,9 +43,9 @@ endforeach()
 
 add_library(
     freecad_android_core SHARED
-    CadCore.cpp CadCoreScripting.cpp OcctMesher.cpp StepIo.cpp
+    CadCore.cpp CadCoreScripting.cpp OcctMesher.cpp StepIo.cpp StepSession.cpp
     PyFreeCadModule.cpp PythonRuntime.cpp
-    jni_bridge.cpp jni_python_bridge.cpp jni_step_bridge.cpp
+    jni_bridge.cpp jni_python_bridge.cpp jni_step_bridge.cpp jni_step_session.cpp
 )
 
 target_compile_features(freecad_android_core PRIVATE cxx_std_17)
