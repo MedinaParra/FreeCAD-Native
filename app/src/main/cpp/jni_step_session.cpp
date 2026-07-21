@@ -184,6 +184,32 @@ Java_com_medinaparra_freecadandroid_nativebridge_NativeStepBridge_nativePreviewP
 }
 
 extern "C" JNIEXPORT jobject JNICALL
+Java_com_medinaparra_freecadandroid_nativebridge_NativeStepBridge_nativePreviewMove(
+    JNIEnv* env,
+    jobject,
+    jlong handle,
+    jdouble deltaX,
+    jdouble deltaY,
+    jdouble deltaZ,
+    jdouble linearDeflection,
+    jdouble angularDeflection) {
+    try {
+        return makePayload(
+            env,
+            fcandroid::StepSessionManager::previewMove(
+                static_cast<std::int64_t>(handle),
+                deltaX,
+                deltaY,
+                deltaZ,
+                linearDeflection,
+                angularDeflection));
+    } catch (...) {
+        throwJava(env, exceptionMessage());
+        return nullptr;
+    }
+}
+
+extern "C" JNIEXPORT jobject JNICALL
 Java_com_medinaparra_freecadandroid_nativebridge_NativeStepBridge_nativeCommitStepSession(
     JNIEnv* env,
     jobject,

@@ -137,6 +137,15 @@ object NativeStepBridge {
         angularDeflection: Double
     ): NativeStepSessionPayload
 
+    private external fun nativePreviewMove(
+        handle: Long,
+        deltaX: Double,
+        deltaY: Double,
+        deltaZ: Double,
+        linearDeflection: Double,
+        angularDeflection: Double
+    ): NativeStepSessionPayload
+
     private external fun nativeCommitStepSession(handle: Long): NativeStepSessionPayload
     private external fun nativeRollbackStepSession(handle: Long): NativeStepSessionPayload
     private external fun nativeSaveStepSession(handle: Long, outputPath: String): String
@@ -177,6 +186,22 @@ object NativeStepBridge {
         snapshot.handle,
         faceId,
         distance,
+        linearDeflection,
+        angularDeflection
+    ).toSnapshot(snapshot.displayName)
+
+    fun previewMove(
+        snapshot: NativeStepSessionSnapshot,
+        deltaX: Double,
+        deltaY: Double,
+        deltaZ: Double,
+        linearDeflection: Double = 0.35,
+        angularDeflection: Double = 0.30
+    ): NativeStepSessionSnapshot = nativePreviewMove(
+        snapshot.handle,
+        deltaX,
+        deltaY,
+        deltaZ,
         linearDeflection,
         angularDeflection
     ).toSnapshot(snapshot.displayName)

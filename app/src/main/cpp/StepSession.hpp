@@ -42,6 +42,14 @@ public:
         double linearDeflection,
         double angularDeflection);
 
+    static StepSessionSnapshot previewMove(
+        std::int64_t handle,
+        double deltaX,
+        double deltaY,
+        double deltaZ,
+        double linearDeflection,
+        double angularDeflection);
+
     static StepSessionSnapshot commit(std::int64_t handle);
     static StepSessionSnapshot rollback(std::int64_t handle);
     static std::string save(std::int64_t handle, const std::string& outputPath);

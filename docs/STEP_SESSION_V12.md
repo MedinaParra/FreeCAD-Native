@@ -26,3 +26,7 @@ This milestone extends the existing one-shot STEP tessellation bridge with a ses
 SolidFreeCAD must use the triangle-to-face map instead of mesh-derived face IDs when a STEP session is available. The UI flow is:
 
 `select planar OCCT face -> enter/drag distance -> preview -> cancel or commit -> save edited copy`.
+
+## Incremental body Move
+
+The session also supports a reversible translation preview for the complete imported BRep. `previewMove` accepts an exact XYZ vector, uses `BRepBuilderAPI_Transform`, participates in the same commit/rollback contract and preserves the source STEP file.

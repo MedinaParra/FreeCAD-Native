@@ -4,6 +4,7 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <GProp_GProps.hxx>
@@ -20,6 +21,7 @@
 #include <TopoDS_Shape.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pln.hxx>
+#include <gp_Trsf.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Vec.hxx>
 
@@ -204,6 +206,31 @@ TopoDS_Shape buildPull(
     return output;
 }
 
+TopoDS_Shape buildMove(
+    const TopoDS_Shape& current,
+    const double deltaX,
+    const double deltaY,
+    const double deltaZ) {
+    if (!std::isfinite(deltaX) || !std::isfinite(deltaY) || !std::isfinite(deltaZ)) {
+        throw std::invalid_argument("Move vector must contain finite values");
+    }
+    const double magnitudeSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+    if (magnitudeSquared < 1.0e-12) {
+        throw std::invalid_argument("Move vector must be non-zero");
+    }
+    gp_Trsf transform;
+    transform.SetTranslation(gp_Vec(deltaX, deltaY, deltaZ));
+    BRepBuilderAPI_Transform operation(current, transform, Standard_True);
+    if (!operation.IsDone()) {
+        throw std::runtime_error("OpenCASCADE could not build the Move preview");
+    }
+    const TopoDS_Shape output = operation.Shape();
+    if (output.IsNull()) {
+        throw std::runtime_error("Move preview produced a null BRep");
+    }
+    return output;
+}
+
 } // namespace
 
 StepSessionSnapshot StepSessionManager::open(
@@ -247,6 +274,26 @@ StepSessionSnapshot StepSessionManager::previewPull(
     session->preview = buildPull(session->current, face, distance);
     session->hasPreview = true;
     return snapshot(handle, *session, true, "Native Pull preview");
+}
+
+StepSessionSnapshot StepSessionManager::previewMove(
+    const std::int64_t handle,
+    const double deltaX,
+    const double deltaY,
+    const double deltaZ,
+    const double linearDeflection,
+    const double angularDeflection) {
+    std::lock_guard<std::mutex> guard(gMutex);
+    const std::shared_ptr<Session> session = requireSession(handle);
+    if (std::isfinite(linearDeflection) && linearDeflection > 0.0) {
+        session->linearDeflection = linearDeflection;
+    }
+    if (std::isfinite(angularDeflection) && angularDeflection > 0.0) {
+        session->angularDeflection = angularDeflection;
+    }
+    session->preview = buildMove(session->current, deltaX, deltaY, deltaZ);
+    session->hasPreview = true;
+    return snapshot(handle, *session, true, "Native body Move preview");
 }
 
 StepSessionSnapshot StepSessionManager::commit(const std::int64_t handle) {
