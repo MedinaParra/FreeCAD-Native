@@ -5,8 +5,10 @@
 #include <Poly_Triangle.hxx>
 #include <Poly_Triangulation.hxx>
 #include <TopAbs_Orientation.hxx>
-#include <TopExp_Explorer.hxx>
+#include <TopAbs_ShapeEnum.hxx>
+#include <TopExp.hxx>
 #include <TopLoc_Location.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <gp_Pnt.hxx>
@@ -78,8 +80,10 @@ MeshData OcctMesher::triangulate(
         -positiveInfinity
     };
 
-    for (TopExp_Explorer explorer(shape, TopAbs_FACE); explorer.More(); explorer.Next()) {
-        const TopoDS_Face face = TopoDS::Face(explorer.Current());
+    TopTools_IndexedMapOfShape faceMap;
+    TopExp::MapShapes(shape, TopAbs_FACE, faceMap);
+    for (Standard_Integer faceIndex = 1; faceIndex <= faceMap.Extent(); ++faceIndex) {
+        const TopoDS_Face face = TopoDS::Face(faceMap(faceIndex));
         TopLoc_Location location;
         const Handle(Poly_Triangulation) triangulation =
             BRep_Tool::Triangulation(face, location);
@@ -121,11 +125,15 @@ MeshData OcctMesher::triangulate(
             mesh.indices.push_back(firstIndex);
             mesh.indices.push_back(firstIndex + 1);
             mesh.indices.push_back(firstIndex + 2);
+            mesh.triangleFaceIds.push_back(static_cast<std::int32_t>(faceIndex));
         }
     }
 
     if (mesh.indices.empty()) {
         throw std::runtime_error("The shape produced no renderable triangles");
+    }
+    if (mesh.triangleFaceIds.size() * 3U != mesh.indices.size()) {
+        throw std::runtime_error("OCCT face mapping does not match the tessellated triangle count");
     }
 
     return mesh;
